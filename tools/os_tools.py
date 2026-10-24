@@ -1,8 +1,9 @@
 """Operating System and hardware management tools for Windows."""
 import os
 import subprocess
-import psutil
+from pathlib import Path
 from typing import Dict, Any, List
+import psutil
 
 # Predefined application mappings for fast voice launching
 COMMON_APPS = {
@@ -22,10 +23,23 @@ COMMON_APPS = {
     "cmd": "start cmd",
     "spotify": "start spotify:",
     "discord": "start discord:",
+    "slack": "start slack:",
+    "telegram": "start telegram:",
+    "whatsapp": "start whatsapp:",
+    "steam": "start steam:",
     "explorer": "explorer",
     "files": "explorer",
+    "file explorer": "explorer",
     "task manager": "taskmgr",
-    "settings": "start ms-settings:"
+    "settings": "start ms-settings:",
+    "control panel": "control",
+    "paint": "mspaint",
+    "word": "start winword",
+    "excel": "start excel",
+    "powerpoint": "start powerpnt",
+    "obs": "start obs64",
+    "github": "start https://github.com",
+    "youtube": "start https://youtube.com",
 }
 
 
@@ -130,7 +144,7 @@ def set_system_volume(level_percent: int) -> Dict[str, Any]:
 
 def media_control(action: str) -> Dict[str, Any]:
     """
-    Sends virtual media keys: 'play_pause', 'next', 'prev', 'mute', 'volume_up', 'volume_down'.
+    Sends virtual media keys: 'play_pause', 'next', 'prev', 'stop', 'volume_up', 'volume_down', 'mute'.
     """
     key_codes = {
         "play_pause": 0xB3,
@@ -166,9 +180,8 @@ def get_running_windows() -> List[str]:
                 if title and len(title.strip()) > 1:
                     windows.append(title.strip())
         win32gui.EnumWindows(enum_handler, None)
-        return windows[:25] # Limit to top 25 windows
+        return windows[:25]
     except Exception:
-        # Fallback to tasklist
         try:
             res = subprocess.run(["tasklist", "/v", "/fo", "csv"], capture_output=True, text=True, timeout=5)
             lines = res.stdout.splitlines()[1:]
@@ -180,7 +193,6 @@ def get_running_windows() -> List[str]:
 def minimize_all_windows() -> Dict[str, Any]:
     """Minimizes all windows to show the desktop (Win+D)."""
     import ctypes
-    # Win key down (0x5B), D key down (0x44)
     ctypes.windll.user32.keybd_event(0x5B, 0, 0, 0)
     ctypes.windll.user32.keybd_event(0x44, 0, 0, 0)
     ctypes.windll.user32.keybd_event(0x44, 0, 2, 0)
@@ -212,3 +224,41 @@ def write_clipboard(text: str) -> Dict[str, Any]:
         return {"success": True, "message": "Copied to clipboard."}
     except Exception as e:
         return {"success": False, "error": f"Failed to write to clipboard: {e}"}
+
+
+def lock_workstation() -> Dict[str, Any]:
+    """Locks the Windows workstation instantly."""
+    try:
+        import ctypes
+        ctypes.windll.user32.LockWorkStation()
+        return {"success": True, "message": "Windows workstation locked."}
+    except Exception as e:
+        return {"success": False, "error": f"Failed to lock workstation: {e}"}
+
+
+def open_folder(folder_path: str = "downloads") -> Dict[str, Any]:
+    """
+    Opens a folder in Windows File Explorer.
+    Supports keywords: 'downloads', 'documents', 'desktop', 'pictures', 'videos', or any absolute path.
+    """
+    user_home = Path.home()
+    folder_map = {
+        "downloads": user_home / "Downloads",
+        "documents": user_home / "Documents",
+        "desktop": user_home / "Desktop",
+        "pictures": user_home / "Pictures",
+        "videos": user_home / "Videos",
+        "home": user_home,
+    }
+
+    clean_target = folder_path.strip().lower()
+    target_path = folder_map.get(clean_target, Path(folder_path))
+
+    if not target_path.exists():
+        return {"success": False, "error": f"Folder '{folder_path}' does not exist."}
+
+    try:
+        os.startfile(str(target_path))
+        return {"success": True, "message": f"Opened folder: {target_path}"}
+    except Exception as e:
+        return {"success": False, "error": f"Could not open folder: {e}"}
