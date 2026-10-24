@@ -1,4 +1,5 @@
-"""TARS — Autonomous Voice-Driven OS Control Agent Entrypoint."""
+import os
+os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
 import sys
 import time
 import argparse

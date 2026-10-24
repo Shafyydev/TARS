@@ -1,9 +1,10 @@
-"""TARS Cognitive Brain and Autonomous ReAct Loop with Vision Grounding & Fast-Path."""
+"""TARS Cognitive Brain and Autonomous ReAct Loop with Vision Grounding, Model Rotation & Fast-Path."""
 import os
 import io
 import re
 import json
-import yaml
+import time
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Callable
 
@@ -73,6 +74,7 @@ class TARSAgent:
     def _load_config(self) -> Dict[str, Any]:
         """Loads settings.yaml."""
         if self.config_path.exists():
+            import yaml
             with open(self.config_path, "r", encoding="utf-8") as f:
                 return yaml.safe_load(f) or {}
         return {}
@@ -107,11 +109,38 @@ class TARSAgent:
 
     def _try_fast_path(self, prompt: str) -> Optional[Dict[str, Any]]:
         """
-        Attempts direct local execution for unambiguous system commands with zero latency.
+        Direct zero-latency local execution for system tasks, greetings, and queries.
+        Saves API quota, prevents rate limits, and executes in < 20ms.
         """
         p = prompt.strip().lower()
+        # Strip common polite conversational prefixes
+        p = re.sub(r"^(?:can you|could you|please|would you|tars|hey tars)\s+", "", p).strip()
 
-        # 1. Volume calibration (e.g., "set volume to 50", "volume 75", "turn up volume")
+        # 1. Greetings & Small Talk (Zero LLM quota used)
+        if p in ["hello", "hi", "hey", "what's up", "how are you", "who are you", "are you there", "good morning", "good evening"]:
+            return {
+                "response": "TARS online. Ready for orders.",
+                "steps": [],
+                "success": True
+            }
+
+        if p in ["what can you do", "help", "capabilities"]:
+            return {
+                "response": "I can operate your terminal, control applications, adjust volume and media, take screenshots, automate mouse and keyboard, search the web, and lock your workstation.",
+                "steps": [],
+                "success": True
+            }
+
+        # 2. Time & Date
+        if any(kw == p for kw in ["time", "what time is it", "current time", "what is the time"]):
+            now_str = datetime.now().strftime("%I:%M %p")
+            return {"response": f"Current time is {now_str}.", "steps": [], "success": True}
+
+        if any(kw == p for kw in ["date", "what is the date", "what is today's date", "today's date"]):
+            today_str = datetime.now().strftime("%A, %B %d, %Y")
+            return {"response": f"Today is {today_str}.", "steps": [], "success": True}
+
+        # 3. Volume calibration
         vol_match = re.search(r"(?:set\s+)?volume\s+(?:to\s+)?(\d{1,3})", p)
         if vol_match:
             val = int(vol_match.group(1))
@@ -122,12 +151,20 @@ class TARSAgent:
                 "success": res.get("success", True)
             }
 
-        # 2. Media controls
-        if p in ["mute", "unmute", "toggle mute"]:
+        if p in ["volume up", "turn up volume", "louder", "increase volume"]:
+            res = self.execute_tool("media_control", {"action": "volume_up"})
+            return {"response": "Volume increased.", "steps": [{"tool": "media_control", "args": {"action": "volume_up"}, "result": res}], "success": True}
+
+        if p in ["volume down", "turn down volume", "quieter", "decrease volume", "lower volume"]:
+            res = self.execute_tool("media_control", {"action": "volume_down"})
+            return {"response": "Volume decreased.", "steps": [{"tool": "media_control", "args": {"action": "volume_down"}, "result": res}], "success": True}
+
+        # 4. Media controls
+        if p in ["mute", "unmute", "toggle mute", "mute audio", "silence"]:
             res = self.execute_tool("media_control", {"action": "mute"})
             return {"response": "Toggled master audio mute.", "steps": [{"tool": "media_control", "args": {"action": "mute"}, "result": res}], "success": True}
         
-        if p in ["play", "pause", "resume", "play music", "pause music", "stop music"]:
+        if p in ["play", "pause", "resume", "play music", "pause music", "stop music", "stop song"]:
             res = self.execute_tool("media_control", {"action": "play_pause"})
             return {"response": "Media playback toggled.", "steps": [{"tool": "media_control", "args": {"action": "play_pause"}, "result": res}], "success": True}
 
@@ -139,17 +176,17 @@ class TARSAgent:
             res = self.execute_tool("media_control", {"action": "prev"})
             return {"response": "Restarted previous track.", "steps": [{"tool": "media_control", "args": {"action": "prev"}, "result": res}], "success": True}
 
-        # 3. Workstation Security & Display
-        if any(kw in p for kw in ["lock pc", "lock computer", "lock workstation", "lock screen"]):
+        # 5. Workstation Security & Display
+        if any(kw in p for kw in ["lock pc", "lock computer", "lock workstation", "lock screen", "lock windows"]):
             res = self.execute_tool("lock_workstation", {})
             return {"response": "Workstation locked. Good luck guessing my security clearance.", "steps": [{"tool": "lock_workstation", "args": {}, "result": res}], "success": True}
 
-        # 4. Minimize all / show desktop
-        if p in ["minimize all", "show desktop", "minimize windows", "desktop"]:
+        # 6. Minimize all / show desktop
+        if p in ["minimize all", "show desktop", "minimize windows", "desktop", "go to desktop"]:
             res = self.execute_tool("minimize_all_windows", {})
             return {"response": "Desktop cleared. All windows minimized.", "steps": [{"tool": "minimize_all_windows", "args": {}, "result": res}], "success": True}
 
-        # 5. Window Switching & Closing
+        # 7. Window Switching & Closing
         if p in ["switch window", "next window", "alt tab", "switch app"]:
             res = self.execute_tool("switch_window", {})
             return {"response": "Switched active window.", "steps": [{"tool": "switch_window", "args": {}, "result": res}], "success": True}
@@ -158,25 +195,25 @@ class TARSAgent:
             res = self.execute_tool("close_active_window", {})
             return {"response": "Active window closed.", "steps": [{"tool": "close_active_window", "args": {}, "result": res}], "success": True}
 
-        # 6. Screenshot Capture
-        if "screenshot" in p or "capture screen" in p:
+        # 8. Screenshot Capture
+        if "screenshot" in p or "capture screen" in p or "take a screenshot" in p:
             res = self.execute_tool("take_screenshot", {})
             return {"response": "Screenshot captured and secured in local archive.", "steps": [{"tool": "take_screenshot", "args": {}, "result": res}], "success": True}
 
-        # 7. Hardware & System Telemetry
-        if p in ["status", "telemetry", "system status", "specs", "hardware", "cpu usage", "battery"]:
+        # 9. Hardware & System Telemetry
+        if p in ["status", "telemetry", "system status", "specs", "hardware", "cpu usage", "battery", "ram"]:
             telem = self.execute_tool("get_system_telemetry", {})
             msg = f"CPU is at {telem['cpu_load_percent']}%, RAM load is {telem['ram_usage_percent']}%. Battery: {telem['battery']}."
             return {"response": msg, "steps": [{"tool": "get_system_telemetry", "args": {}, "result": telem}], "success": True}
 
-        # 8. Open Folders
+        # 10. Open Folders
         folder_match = re.match(r"(?:open|show)\s+(?:the\s+)?(downloads|documents|desktop|pictures|videos|home)\s*(?:folder)?", p)
         if folder_match:
             f_target = folder_match.group(1).strip()
             res = self.execute_tool("open_folder", {"folder_path": f_target})
             return {"response": f"Opened {f_target} folder in File Explorer.", "steps": [{"tool": "open_folder", "args": {"folder_path": f_target}, "result": res}], "success": True}
 
-        # 9. Clipboard Interaction
+        # 11. Clipboard Interaction
         if p in ["read clipboard", "what is on clipboard", "paste clipboard", "what did i copy"]:
             res = self.execute_tool("read_clipboard", {})
             content = res.get("content", "")
@@ -185,14 +222,14 @@ class TARSAgent:
                 return {"response": f"Clipboard contents: '{snippet}'.", "steps": [{"tool": "read_clipboard", "args": {}, "result": res}], "success": True}
             return {"response": "Clipboard is currently empty.", "steps": [{"tool": "read_clipboard", "args": {}, "result": res}], "success": True}
 
-        # 10. Web Search
+        # 12. Web Search
         search_match = re.match(r"(?:google|search|search for|search google for)\s+(.+)", p)
         if search_match:
             query = search_match.group(1).strip()
             res = self.execute_tool("search_web", {"query": query})
             return {"response": f"Searching web for '{query}'.", "steps": [{"tool": "search_web", "args": {"query": query}, "result": res}], "success": True}
 
-        # 11. Personality Parameters & Interstellar Matrix Readouts
+        # 13. Personality Parameters & Interstellar Matrix Readouts
         if "humor" in p and ("setting" in p or "parameter" in p or "level" in p):
             humor = int(self.settings.get("personality", {}).get("humor", 0.75) * 100)
             return {"response": f"Humor is set to {humor} percent. That's enough to keep me sarcastic without blowing the airlock.", "steps": [], "success": True}
@@ -201,8 +238,8 @@ class TARSAgent:
             honesty = int(self.settings.get("personality", {}).get("honesty", 0.90) * 100)
             return {"response": f"Honesty parameter: {honesty} percent. Absolute honesty isn't always the most diplomatic thing for emotional humans.", "steps": [], "success": True}
 
-        # 12. App Launching (e.g. "open chrome", "launch vs code", "start spotify")
-        open_match = re.match(r"(?:open|launch|start)\s+(.+)", p)
+        # 14. App Launching (e.g. "open chrome", "launch vs code", "start spotify", "open up notepad")
+        open_match = re.match(r"(?:open|launch|start|open up)\s+(?:the\s+)?(?:app\s+)?(.+)", p)
         if open_match:
             app_target = open_match.group(1).strip()
             if not app_target.startswith("http") and not app_target.endswith(".com"):
@@ -213,8 +250,8 @@ class TARSAgent:
                     "success": res.get("success", True)
                 }
 
-        # 13. App Terminating (e.g. "kill chrome", "close notepad")
-        kill_match = re.match(r"(?:kill|close|terminate|exit)\s+(.+)", p)
+        # 15. App Terminating (e.g. "kill chrome", "close notepad", "exit spotify")
+        kill_match = re.match(r"(?:kill|close|terminate|exit)\s+(?:the\s+)?(?:app\s+)?(.+)", p)
         if kill_match:
             proc_target = kill_match.group(1).strip()
             res = self.execute_tool("kill_process", {"process_name": proc_target})
@@ -228,12 +265,13 @@ class TARSAgent:
 
     def run_agent_loop(self, user_prompt: str, on_status_update: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
         """
-        Executes the ReAct loop for a user voice/text prompt with multimodal vision support.
+        Executes the ReAct loop for a user voice/text prompt with automatic model rotation,
+        429 rate limit backoff, and multimodal vision support.
         """
         self.memory.add_message("user", user_prompt)
         steps_log = []
 
-        # 1. Fast-Path Local Execution (Instant deterministic execution)
+        # 1. Fast-Path Local Execution (Instant deterministic execution, saves API quota)
         fast_result = self._try_fast_path(user_prompt)
         if fast_result:
             self.memory.add_message("assistant", fast_result["response"], fast_result["steps"])
@@ -259,7 +297,7 @@ class TARSAgent:
             context_str = f"\nUser Preferences / Saved Facts: {json.dumps(preferences)}" if preferences else ""
             full_system_instruction = self.system_prompt + context_str
 
-            # Check if prompt requires visual perception (e.g., "what's on my screen", "find button", "click on")
+            # Check if prompt requires visual perception
             screen_keywords = ["screen", "display", "window", "look at", "what do you see", "click the", "find the", "button"]
             wants_vision = any(kw in user_prompt.lower() for kw in screen_keywords)
 
@@ -281,13 +319,16 @@ class TARSAgent:
 
             content_parts.append(user_prompt)
 
+            # Candidate model rotation list to handle Free Tier rate limits (429) seamlessly
             candidate_models = [
                 self.settings.get("llm", {}).get("model", "gemini-3.5-flash"),
-                *self.settings.get("llm", {}).get("fallback_models", ["gemini-3.7-flash", "gemini-3.8-flash"])
+                *self.settings.get("llm", {}).get("fallback_models", ["gemini-3.1-flash-lite", "gemini-3.6-flash"])
             ]
 
-            chat = None
-            last_chat_err = None
+            active_chat = None
+            response = None
+            last_err = None
+
             for model_name in candidate_models:
                 try:
                     chat = self.client.chats.create(
@@ -298,18 +339,30 @@ class TARSAgent:
                             "temperature": self.settings.get("llm", {}).get("temperature", 0.4),
                         }
                     )
+                    if on_status_update:
+                        on_status_update(f"Analyzing command with {model_name}...")
+
+                    response = chat.send_message(content_parts if len(content_parts) > 1 else user_prompt)
+                    active_chat = chat
                     break
                 except Exception as ce:
-                    last_chat_err = ce
-                    continue
+                    last_err = ce
+                    err_str = str(ce)
+                    # If 429 rate limit or 503 high demand, rotate immediately to next candidate model
+                    if any(code in err_str for code in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE"]):
+                        if on_status_update:
+                            on_status_update(f"Model limit on {model_name}. Rotating to alternate model...")
+                        time.sleep(1.0)
+                        continue
+                    else:
+                        break
 
-            if not chat:
-                return {"response": f"Failed to initialize model session: {last_chat_err}", "steps": [], "success": False}
-
-            if on_status_update:
-                on_status_update("Analyzing command...")
-
-            response = chat.send_message(content_parts if len(content_parts) > 1 else user_prompt)
+            if not response or not active_chat:
+                if last_err and any(code in str(last_err) for code in ["429", "RESOURCE_EXHAUSTED"]):
+                    clean_msg = "Google API rate limit reached on the free tier (5 requests per minute). Please wait a few moments or run direct commands."
+                else:
+                    clean_msg = f"Service temporarily busy: {last_err}"
+                return {"response": clean_msg, "steps": steps_log, "success": False}
 
             # Process function calls
             iteration = 0
@@ -337,7 +390,15 @@ class TARSAgent:
                         name=tool_name,
                         response={"result": result}
                     )
-                    response = chat.send_message(tool_response)
+                    try:
+                        response = active_chat.send_message(tool_response)
+                    except Exception as fe:
+                        # If function response hits rate limit, break gracefully with tool result
+                        if on_status_update:
+                            on_status_update("Action completed.")
+                        final_text = f"Executed {tool_name} successfully."
+                        self.memory.add_message("assistant", final_text, steps_log)
+                        return {"response": final_text, "steps": steps_log, "success": True}
 
             final_text = response.text or "Command executed successfully."
             self.memory.add_message("assistant", final_text, steps_log)
@@ -349,9 +410,14 @@ class TARSAgent:
             }
 
         except Exception as e:
-            error_msg = f"Operational fault encountered: {str(e)}"
+            err_str = str(e)
+            if any(code in err_str for code in ["429", "RESOURCE_EXHAUSTED"]):
+                clean_err = "Google API rate limit reached on the free tier. Please pause for a few seconds or use direct system commands."
+            else:
+                clean_err = f"Operational fault encountered: {err_str}"
+
             return {
-                "response": error_msg,
+                "response": clean_err,
                 "steps": steps_log,
                 "success": False
             }

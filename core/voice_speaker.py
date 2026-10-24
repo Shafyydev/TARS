@@ -8,6 +8,9 @@ import threading
 from typing import Optional
 
 
+os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
+
+
 class VoiceSpeaker:
     """
     Handles text-to-speech synthesis using Microsoft Neural voices via edge-tts,
@@ -55,6 +58,10 @@ class VoiceSpeaker:
 
     def _clean_text_for_speech(self, text: str) -> str:
         """Strips markdown, emojis, codeblocks, and raw URLs for crisp speech delivery."""
+        # Sanitize technical API errors so TARS never speaks raw JSON or stack traces aloud
+        if any(err_kw in text for err_kw in ["{'error':", "RESOURCE_EXHAUSTED", "429", "Traceback (most recent"]):
+            return "API rate limit reached on the free tier. Please pause for a few seconds or use direct system commands."
+
         clean = re.sub(r"```[\s\S]*?```", "", text)
         clean = re.sub(r"`([^`]+)`", r"\1", clean)
         clean = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", clean)
