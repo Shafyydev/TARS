@@ -1,0 +1,28 @@
+{
+  "blocked_commands": [
+    "format c:",
+    "del /f /s /q c:\\windows",
+    "rmdir /s /q c:\\windows",
+    "diskpart",
+    "bcdedit",
+    "reg delete hklm",
+    "drop database",
+    ":(){ :|:& };:"
+  ],
+  "confirmation_required_patterns": [
+    "rmdir /s",
+    "rm -rf",
+    "del /s",
+    "Remove-Item.*-Recurse",
+    "git reset --hard",
+    "git clean -fdx",
+    "shutdown",
+    "Stop-Computer",
+    "taskkill /f /im explorer.exe"
+  ],
+  "protected_paths": [
+    "C:\\Windows",
+    "C:\\Program Files",
+    "C:\\Program Files (x86)"
+  ]
+}

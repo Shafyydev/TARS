@@ -1,0 +1,28 @@
+# Core AI & Reasoning
+google-genai>=1.0.0
+pydantic>=2.7.0
+python-dotenv>=1.0.1
+pyyaml>=6.0.1
+
+# Terminal UI & Telemetry
+rich>=13.7.0
+colorama>=0.4.6
+psutil>=5.9.8
+
+# Windows OS Automation & Hardware Control
+pyautogui>=0.9.54
+pywin32>=306; sys_platform == 'win32'
+pycaw>=20240210; sys_platform == 'win32'
+comtypes>=1.4.1; sys_platform == 'win32'
+pillow>=10.3.0
+
+# Voice I/O & Audio Synthesis
+edge-tts>=6.1.12
+pygame>=2.5.2
+SpeechRecognition>=3.10.4
+pyaudio>=0.2.14
+
+# Web & Network Automation
+playwright>=1.44.0
+beautifulsoup4>=4.12.3
+requests>=2.31.0

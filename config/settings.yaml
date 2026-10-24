@@ -1,0 +1,34 @@
+# TARS Master Configuration File
+
+assistant:
+  name: "TARS"
+  callsign: "TARS"
+  version: "1.0.0"
+
+personality:
+  humor: 0.75          # Scale: 0.0 (deadpan) to 1.0 (roast master)
+  honesty: 0.90        # Scale: 0.0 (diplomatic) to 1.0 (blunt truth)
+  sarcasm: 0.60        # Scale: 0.0 (literal) to 1.0 (sharp wit)
+  conciseness: true    # Keep spoken answers under 2 sentences unless requested
+
+llm:
+  provider: "gemini"
+  model: "gemini-2.5-flash"
+  temperature: 0.4
+  max_output_tokens: 2048
+
+voice:
+  enabled: true
+  tts_engine: "edge-tts"
+  voice_name: "en-US-GuyNeural" # Natural, confident, slightly deep voice
+  rate: "+5%"
+  volume: "+0%"
+  stt_energy_threshold: 300
+  stt_pause_threshold: 0.8
+  stt_timeout: 5
+
+execution:
+  powershell_timeout_seconds: 30
+  auto_focus_window: true
+  enable_browser_headless: false
+  safety_strict_mode: true
