@@ -251,8 +251,6 @@ class TARSAgent:
                 "success": False
             }
 
-        model_name = self.settings.get("llm", {}).get("model", "gemini-2.5-flash")
-
         try:
             # Reconstruct recent conversation context
             recent_context = self.memory.get_recent_messages(limit=6)
@@ -275,7 +273,6 @@ class TARSAgent:
                     from PIL import Image
                     from google.genai import types
                     
-                    # Read and attach screenshot part
                     with open(shot_res["filepath"], "rb") as f:
                         img_bytes = f.read()
                     
@@ -284,14 +281,30 @@ class TARSAgent:
 
             content_parts.append(user_prompt)
 
-            chat = self.client.chats.create(
-                model=model_name,
-                config={
-                    "system_instruction": full_system_instruction,
-                    "tools": self.get_tool_declarations(),
-                    "temperature": self.settings.get("llm", {}).get("temperature", 0.4),
-                }
-            )
+            candidate_models = [
+                self.settings.get("llm", {}).get("model", "gemini-3.5-flash"),
+                *self.settings.get("llm", {}).get("fallback_models", ["gemini-3.7-flash", "gemini-3.8-flash"])
+            ]
+
+            chat = None
+            last_chat_err = None
+            for model_name in candidate_models:
+                try:
+                    chat = self.client.chats.create(
+                        model=model_name,
+                        config={
+                            "system_instruction": full_system_instruction,
+                            "tools": self.get_tool_declarations(),
+                            "temperature": self.settings.get("llm", {}).get("temperature", 0.4),
+                        }
+                    )
+                    break
+                except Exception as ce:
+                    last_chat_err = ce
+                    continue
+
+            if not chat:
+                return {"response": f"Failed to initialize model session: {last_chat_err}", "steps": [], "success": False}
 
             if on_status_update:
                 on_status_update("Analyzing command...")
