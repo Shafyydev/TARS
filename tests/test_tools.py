@@ -1,9 +1,13 @@
-"""Unit tests for TARS execution tools and safety layer."""
+"""Unit tests for TARS execution tools, voice components, and safety layer."""
 import unittest
 from tools.safety import SafetyValidator
 from tools.terminal_tools import run_powershell
 from tools.os_tools import get_system_telemetry
+from tools.gui_tools import get_screen_dimensions
 from core.memory import MemoryStore
+from core.voice_speaker import VoiceSpeaker
+from core.voice_listener import VoiceListener
+from core.brain import TARSAgent
 
 
 class TestTARS(unittest.TestCase):
@@ -11,6 +15,9 @@ class TestTARS(unittest.TestCase):
     def setUp(self):
         self.safety = SafetyValidator()
         self.memory = MemoryStore(":memory:")
+        self.speaker = VoiceSpeaker()
+        self.listener = VoiceListener()
+        self.agent = TARSAgent()
 
     def test_safe_command(self):
         is_allowed, req_confirm, reason = self.safety.evaluate_command("Get-Process")
@@ -37,6 +44,13 @@ class TestTARS(unittest.TestCase):
         self.assertIn("ram_usage_percent", telem)
         self.assertGreaterEqual(telem["ram_usage_percent"], 0)
 
+    def test_screen_dimensions(self):
+        dims = get_screen_dimensions()
+        self.assertIn("width", dims)
+        self.assertIn("height", dims)
+        self.assertGreater(dims["width"], 0)
+        self.assertGreater(dims["height"], 0)
+
     def test_memory_store(self):
         self.memory.set_user_preference("humor", 85)
         val = self.memory.get_user_preference("humor")
@@ -47,13 +61,39 @@ class TestTARS(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(msgs[0]["content"], "Hello TARS")
 
-    def test_agent_fast_path(self):
-        from core.brain import TARSAgent
-        agent = TARSAgent()
-        res = agent.run_agent_loop("system status")
+    def test_voice_speaker_text_cleaning(self):
+        raw = "Hello **world**! Check [docs](https://google.com) and `python main.py`"
+        clean = self.speaker._clean_text_for_speech(raw)
+        self.assertNotIn("**", clean)
+        self.assertNotIn("`", clean)
+        self.assertNotIn("https://", clean)
+        self.assertIn("Hello world!", clean)
+
+    def test_voice_listener_wake_word(self):
+        is_act, cmd = self.listener.check_wake_word("TARS open chrome")
+        self.assertTrue(is_act)
+        self.assertEqual(cmd, "open chrome")
+
+        is_act2, cmd2 = self.listener.check_wake_word("hey tars, minimize windows")
+        self.assertTrue(is_act2)
+        self.assertEqual(cmd2, "minimize windows")
+
+    def test_agent_fast_paths(self):
+        # 1. Telemetry
+        res = self.agent.run_agent_loop("system status")
         self.assertTrue(res["success"])
         self.assertTrue(len(res["steps"]) > 0)
         self.assertEqual(res["steps"][0]["tool"], "get_system_telemetry")
+
+        # 2. Humor query
+        res_humor = self.agent.run_agent_loop("what is your humor setting")
+        self.assertTrue(res_humor["success"])
+        self.assertIn("Humor", res_humor["response"])
+
+        # 3. Switch window
+        res_switch = self.agent.run_agent_loop("switch window")
+        self.assertTrue(res_switch["success"])
+        self.assertEqual(res_switch["steps"][0]["tool"], "switch_window")
 
 
 if __name__ == "__main__":
