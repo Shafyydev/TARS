@@ -44,21 +44,28 @@ def normalize_voice_command(text: str) -> str:
 
     t = text.strip()
 
-    # Browser tab confusions: "tap" / "top" -> "tab"
+    # Browser tab confusions: "tap" / "top" / "table" -> "tab"
     t = re.sub(
-        r"\b(new|close|next|previous|prev|switch|open|reopen)\s+(?:this\s+)?(?:the\s+)?(?:tap|top)\b",
+        r"\b(new|close|next|previous|prev|switch|open|reopen|shut)\s+(?:this\s+)?(?:the\s+)?(?:tap|top|table)\b",
         r"\1 tab",
         t,
         flags=re.IGNORECASE
     )
     # Homophones: "clothes" -> "close"
     t = re.sub(r"\bclothes\s+(tab|window|app|this)\b", r"close \1", t, flags=re.IGNORECASE)
-    # "write click" -> "right click"
-    t = re.sub(r"\bwrite\s+click\b", "right click", t, flags=re.IGNORECASE)
+    # "write/ride click" -> "right click"
+    t = re.sub(r"\b(?:write|ride|rite)\s+click\b", "right click", t, flags=re.IGNORECASE)
     # "double-click" -> "double click"
     t = re.sub(r"\bdouble-click\b", "double click", t, flags=re.IGNORECASE)
+    # "call down / stroll down" -> "scroll down"
+    t = re.sub(r"\b(?:call|stroll|score|crawled)\s+down\b", "scroll down", t, flags=re.IGNORECASE)
+    # "stroll up / score up" -> "scroll up"
+    t = re.sub(r"\b(?:call|stroll|score)\s+up\b", "scroll up", t, flags=re.IGNORECASE)
     # "screen shot" -> "screenshot"
     t = re.sub(r"\bscreen\s+shot\b", "screenshot", t, flags=re.IGNORECASE)
+    # "mood / meet" -> "mute"
+    if t.lower() in ["mood", "meet", "newt"]:
+        t = "mute"
     # Single-word "ex", "ax it", "eggs it" -> "exit"
     if t.lower() in ["ex", "ax it", "eggs it", "exit out", "ex it"]:
         t = "exit"
@@ -80,8 +87,8 @@ class VoiceListener:
 
     def __init__(
         self,
-        energy_threshold: int = 300,
-        pause_threshold: float = 0.65,
+        energy_threshold: int = 250,
+        pause_threshold: float = 0.35,
         language: Optional[str] = None,
         mic_index: Optional[int] = None
     ):
@@ -99,19 +106,21 @@ class VoiceListener:
         self._init_audio()
 
     def _init_audio(self) -> None:
-        """Initializes speech_recognition with robust acoustic VAD parameters."""
+        """Initializes speech_recognition with tuned low-latency acoustic VAD parameters."""
         try:
             import speech_recognition as sr
             self._recognizer = sr.Recognizer()
             self._recognizer.energy_threshold = self.energy_threshold
-            # Resilient pause threshold (prevents mid-phrase audio chopping)
+            # Rapid 0.35s end-of-phrase detection (snappy without clipping words)
             self._recognizer.pause_threshold = self.pause_threshold
-            self._recognizer.non_speaking_duration = 0.35
-            self._recognizer.phrase_threshold = 0.25
-            # Dynamic adaptation to ambient room sound
+            self._recognizer.non_speaking_duration = 0.15
+            self._recognizer.phrase_threshold = 0.15
+            # Set strict network operation timeout to prevent socket hangs
+            self._recognizer.operation_timeout = 3.5
+            # Smooth dynamic adaptation to ambient room sound
             self._recognizer.dynamic_energy_threshold = True
             self._recognizer.dynamic_energy_adjustment_damping = 0.20
-            self._recognizer.dynamic_energy_ratio = 1.5
+            self._recognizer.dynamic_energy_ratio = 1.4
 
             self._microphone = sr.Microphone(device_index=self.mic_index)
         except Exception as e:
@@ -169,8 +178,8 @@ class VoiceListener:
 
     def listen_once(
         self,
-        timeout: int = 6,
-        phrase_time_limit: int = 10,
+        timeout: int = 4,
+        phrase_time_limit: int = 4,
         on_listening_start: Optional[Callable[[], None]] = None
     ) -> Tuple[Optional[str], Optional[str]]:
         """
@@ -192,15 +201,11 @@ class VoiceListener:
                     phrase_time_limit=phrase_time_limit
                 )
 
-            # Primary attempt: locale-aware recognition (e.g. en-IN)
+            # Fast single STT network call with user's locale (e.g. en-IN)
             try:
                 text = self._recognizer.recognize_google(audio, language=self.language)
             except sr.UnknownValueError:
-                # Fallback to en-US if primary locale failed
-                if self.language != "en-US":
-                    text = self._recognizer.recognize_google(audio, language="en-US")
-                else:
-                    return None, "unrecognized"
+                return None, "unrecognized"
 
             if text and text.strip():
                 normalized = normalize_voice_command(text.strip())

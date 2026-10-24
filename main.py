@@ -190,7 +190,7 @@ def main() -> None:
 
             if args.voice_mode:
                 console.print("\n[bold green]🎙️  Listening... (Speak now)[/bold green]")
-                raw_speech, status = listener.listen_once(timeout=8, phrase_time_limit=10) if listener else (None, "no listener")
+                raw_speech, status = listener.listen_once(timeout=4, phrase_time_limit=4.5) if listener else (None, "no listener")
                 
                 if status == "timeout":
                     continue
@@ -210,7 +210,7 @@ def main() -> None:
                     if speaker:
                         speaker.speak("Standing by. What is your command?", blocking=True)
                     console.print("[bold yellow]🎙️  Listening for command...[/bold yellow]")
-                    follow_speech, _ = listener.listen_once(timeout=6, phrase_time_limit=8)
+                    follow_speech, _ = listener.listen_once(timeout=5, phrase_time_limit=5)
                     if not follow_speech:
                         continue
                     clean_command = follow_speech

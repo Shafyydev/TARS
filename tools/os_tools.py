@@ -139,31 +139,43 @@ def set_system_volume(level_percent: int) -> Dict[str, Any]:
     """
     level_percent = max(0, min(100, level_percent))
     
-    # Try pycaw first if available
+    # 1. Modern pycaw (sub-50ms execution)
+    try:
+        from pycaw.pycaw import AudioUtilities
+        speakers = AudioUtilities.GetSpeakers()
+        if hasattr(speakers, "volume_percent"):
+            speakers.volume_percent = level_percent
+            return {"success": True, "message": f"Master volume set to {level_percent}%."}
+    except Exception:
+        pass
+
+    # 2. Legacy pycaw COM endpoint
     try:
         from ctypes import cast, POINTER
         from comtypes import CLSCTX_ALL
         from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
         
         devices = AudioUtilities.GetSpeakers()
-        interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-        volume = cast(interface, POINTER(IAudioEndpointVolume))
-        # pycaw scalar volume is 0.0 to 1.0
-        volume.SetMasterVolumeLevelScalar(level_percent / 100.0, None)
-        return {"success": True, "message": f"Master volume set to {level_percent}%."}
+        if hasattr(devices, "Activate"):
+            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            volume = cast(interface, POINTER(IAudioEndpointVolume))
+            volume.SetMasterVolumeLevelScalar(level_percent / 100.0, None)
+            return {"success": True, "message": f"Master volume set to {level_percent}%."}
     except Exception:
-        # Fallback using PowerShell
-        try:
-            ps_vol = f"""
-            $obj = New-Object -ComObject WScript.Shell
-            1..50 | ForEach-Object {{ $obj.SendKeys([char]174) }}
-            $steps = [math]::Round({level_percent} / 2)
-            1..$steps | ForEach-Object {{ $obj.SendKeys([char]175) }}
-            """
-            subprocess.run(["powershell", "-Command", ps_vol], capture_output=True, timeout=5)
-            return {"success": True, "message": f"Volume adjusted to ~{level_percent}% via fallback."}
-        except Exception as e:
-            return {"success": False, "error": f"Could not adjust volume: {e}"}
+        pass
+
+    # 3. Fallback using PowerShell
+    try:
+        ps_vol = f"""
+        $obj = New-Object -ComObject WScript.Shell
+        1..50 | ForEach-Object {{ $obj.SendKeys([char]174) }}
+        $steps = [math]::Round({level_percent} / 2)
+        1..$steps | ForEach-Object {{ $obj.SendKeys([char]175) }}
+        """
+        subprocess.run(["powershell", "-Command", ps_vol], capture_output=True, timeout=3)
+        return {"success": True, "message": f"Volume adjusted to ~{level_percent}% via fallback."}
+    except Exception as e:
+        return {"success": False, "error": f"Could not adjust volume: {e}"}
 
 
 def media_control(action: str) -> Dict[str, Any]:
