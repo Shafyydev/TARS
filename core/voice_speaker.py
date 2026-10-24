@@ -27,11 +27,13 @@ class VoiceSpeaker:
         "Processing.",
     ]
 
-    def __init__(self, voice_name: str = "en-US-GuyNeural", rate: str = "+0%", pitch: str = "+0Hz", fast_voice: bool = False):
+    def __init__(self, voice_name: str = "en-US-GuyNeural", rate: str = "+0%", pitch: str = "+0Hz", fast_voice: bool = True):
         self.voice_name = os.getenv("TARS_VOICE", voice_name)
         self.rate = os.getenv("TARS_VOICE_RATE", rate)
         self.pitch = os.getenv("TARS_VOICE_PITCH", pitch)
-        self.fast_voice = fast_voice or (os.getenv("TARS_FAST_VOICE", "0") in ["1", "true", "True"])
+        # Default to fast native Windows SAPI for zero-latency instant responses unless cloud neural voice requested
+        force_neural = (os.getenv("TARS_NEURAL_VOICE", "0") in ["1", "true", "True"]) or (not fast_voice)
+        self.fast_voice = not force_neural
         self._is_speaking = False
         self._pygame_initialized = False
         self._lock = threading.Lock()
@@ -101,14 +103,19 @@ class VoiceSpeaker:
             return False
 
     def _speak_sapi(self, text: str, async_mode: bool = False) -> bool:
-        """Zero-latency offline speech using Windows native SAPI."""
+        """Zero-latency offline speech using Windows native SAPI with tactical military tone."""
         try:
             import win32com.client
             import pythoncom
             pythoncom.CoInitialize()
             speaker = win32com.client.Dispatch("SAPI.SpVoice")
-            # Flag 1 is SVSFlagsAsync (non-blocking, instant return)
-            flags = 1 if async_mode else 0
+            for v in speaker.GetVoices():
+                if "david" in v.GetDescription().lower():
+                    speaker.Voice = v
+                    break
+            speaker.Rate = 1
+            # Flag 1: SVSFlagsAsync (non-blocking), Flag 2: SVSFPurgeBeforeSpeak
+            flags = (1 | 2) if async_mode else 0
             speaker.Speak(text, flags)
             pythoncom.CoUninitialize()
             return True

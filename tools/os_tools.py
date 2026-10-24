@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Dict, Any, List
 import psutil
 
-# Predefined application mappings for fast voice launching
+# Predefined application & web destination mappings for fast voice launching
 COMMON_APPS = {
     "chrome": "start chrome",
     "google chrome": "start chrome",
@@ -38,26 +38,50 @@ COMMON_APPS = {
     "excel": "start excel",
     "powerpoint": "start powerpnt",
     "obs": "start obs64",
+    # Websites & Quick Web Destinations
     "github": "start https://github.com",
+    "my github": "start https://github.com/Shafyydev",
+    "my profile github": "start https://github.com/Shafyydev",
+    "profile github": "start https://github.com/Shafyydev",
+    "github profile": "start https://github.com/Shafyydev",
     "youtube": "start https://youtube.com",
+    "google": "start https://google.com",
+    "gmail": "start https://mail.google.com",
+    "mail": "start https://mail.google.com",
+    "email": "start https://mail.google.com",
+    "chatgpt": "start https://chat.openai.com",
+    "reddit": "start https://reddit.com",
+    "twitter": "start https://x.com",
+    "x": "start https://x.com",
+    "linkedin": "start https://linkedin.com",
+    "instagram": "start https://instagram.com",
+    "netflix": "start https://netflix.com",
+    "amazon": "start https://amazon.com",
 }
 
 
 def launch_application(app_name: str) -> Dict[str, Any]:
     """
-    Launches an application by common name or executable path.
+    Launches an application or web destination by common name or executable path.
     """
     clean_name = app_name.strip().lower()
-    
-    if clean_name in COMMON_APPS:
+
+    # Smart GitHub profile resolution
+    if "github" in clean_name and any(kw in clean_name for kw in ["profile", "my", "account", "user"]):
+        cmd = "start https://github.com/Shafyydev"
+        clean_name = "GitHub profile (Shafyydev)"
+    elif clean_name in COMMON_APPS:
         cmd = COMMON_APPS[clean_name]
+    elif any(clean_name.endswith(ext) for ext in [".com", ".org", ".io", ".net", ".dev", ".edu", ".gov"]) or clean_name.startswith("http"):
+        url = clean_name if clean_name.startswith("http") else f"https://{clean_name}"
+        cmd = f"start {url}"
     else:
         # Fallback to direct Windows start
         cmd = f"start \"\" \"{app_name}\""
 
     try:
         subprocess.Popen(cmd, shell=True)
-        return {"success": True, "message": f"Successfully launched {app_name}."}
+        return {"success": True, "message": f"Successfully launched {clean_name}."}
     except Exception as e:
         return {"success": False, "error": f"Failed to launch {app_name}: {str(e)}"}
 

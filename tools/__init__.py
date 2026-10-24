@@ -19,13 +19,18 @@ from tools.gui_tools import (
     click_coordinate,
     double_click,
     right_click,
+    middle_click,
+    move_mouse,
+    move_mouse_relative,
     drag_mouse,
     type_text,
     press_keys,
     scroll_screen,
     get_screen_dimensions,
     switch_window,
-    close_active_window
+    close_active_window,
+    maximize_active_window,
+    minimize_active_window
 )
 from tools.browser_tools import open_url, search_web, fetch_webpage_summary, get_free_knowledge
 
@@ -48,6 +53,9 @@ __all__ = [
     "click_coordinate",
     "double_click",
     "right_click",
+    "middle_click",
+    "move_mouse",
+    "move_mouse_relative",
     "drag_mouse",
     "type_text",
     "press_keys",
@@ -55,6 +63,8 @@ __all__ = [
     "get_screen_dimensions",
     "switch_window",
     "close_active_window",
+    "maximize_active_window",
+    "minimize_active_window",
     "open_url",
     "search_web",
     "fetch_webpage_summary",

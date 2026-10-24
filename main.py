@@ -120,7 +120,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="TARS Autonomous Voice-Driven OS Control Agent")
     parser.add_argument("--text-only", action="store_true", help="Run in silent text-only mode (no audio output)")
     parser.add_argument("--voice", "--voice-only", dest="voice_mode", action="store_true", help="Run in continuous hands-free voice loop")
-    parser.add_argument("--fast-voice", action="store_true", help="Use zero-latency native Windows voice for maximum speed")
+    parser.add_argument("--neural-voice", action="store_true", help="Use cloud neural Edge-TTS voice (higher fidelity, but slower network latency)")
+    parser.add_argument("--fast-voice", action="store_true", default=True, help="Use zero-latency native Windows voice for maximum speed (default)")
     parser.add_argument("--test-mic", action="store_true", help="Test microphone input and speech recognition")
     parser.add_argument("--diagnostics", action="store_true", help="Run hardware and tool diagnostics")
     args = parser.parse_args()
@@ -135,7 +136,8 @@ def main() -> None:
 
     # Initialize TARS Brain & Voice
     agent = TARSAgent()
-    speaker = VoiceSpeaker(fast_voice=args.fast_voice) if not args.text_only else None
+    use_fast = not args.neural_voice
+    speaker = VoiceSpeaker(fast_voice=use_fast) if not args.text_only else None
     listener = VoiceListener() if (args.voice_mode or not args.text_only) else None
 
     render_hud(agent)
@@ -156,7 +158,7 @@ def main() -> None:
         console.print(" • Type your instructions directly.")
         console.print(" • Type [bold cyan]'v'[/bold cyan] or [bold cyan]'voice'[/bold cyan] to speak a single command via microphone.")
         console.print(" • Run with [bold green]python main.py --voice[/bold green] for continuous hands-free voice control.")
-        console.print(" • Add [bold green]--fast-voice[/bold green] for zero-latency instant offline speech responses.")
+        console.print(" • Zero-latency native speech is active by default. (Add [bold green]--neural-voice[/bold green] for cloud Edge-TTS).")
         console.print(" • Type [bold cyan]'exit'[/bold cyan] or [bold cyan]'quit'[/bold cyan] to disarm TARS.\n")
 
     while True:
@@ -193,8 +195,8 @@ def main() -> None:
                 user_input = clean_command if (is_ww and clean_command) else raw_speech
                 console.print(f"[bold cyan]🎙️  You said:[/bold cyan] [bold white]\"{user_input}\"[/bold white]")
 
-                # Immediate zero-latency acknowledgment in parallel
-                if speaker:
+                # If using neural cloud voice, speak an immediate acknowledgment while synthesis begins
+                if speaker and not speaker.fast_voice:
                     speaker.speak_ack()
 
             else:

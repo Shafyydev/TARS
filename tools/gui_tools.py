@@ -48,29 +48,58 @@ def take_screenshot(filename: Optional[str] = None) -> Dict[str, Any]:
         return {"success": False, "error": f"Failed to capture screenshot: {str(e)}"}
 
 
-def click_coordinate(x: int, y: int, button: str = "left", clicks: int = 1) -> Dict[str, Any]:
+def click_coordinate(x: Optional[int] = None, y: Optional[int] = None, button: str = "left", clicks: int = 1) -> Dict[str, Any]:
     """
-    Moves mouse cursor to (x, y) and performs click(s).
+    Moves mouse to (x, y) and clicks, or clicks at current cursor position if no coordinates given.
     """
     try:
-        pyautogui.moveTo(x, y, duration=0.2)
-        pyautogui.click(x=x, y=y, clicks=clicks, button=button)
-        return {"success": True, "message": f"Clicked at ({x}, {y}) with {button} button ({clicks}x)."}
+        if x is not None and y is not None:
+            pyautogui.moveTo(x, y, duration=0.15)
+            pyautogui.click(x=x, y=y, clicks=clicks, button=button)
+            return {"success": True, "message": f"Clicked at ({x}, {y}) with {button} button ({clicks}x)."}
+        else:
+            pyautogui.click(clicks=clicks, button=button)
+            cur_x, cur_y = pyautogui.position()
+            return {"success": True, "message": f"Clicked at current position ({cur_x}, {cur_y}) with {button} button."}
     except Exception as e:
         return {"success": False, "error": f"Click failed: {str(e)}"}
 
 
-def double_click(x: int, y: int) -> Dict[str, Any]:
-    """Double-clicks at the specified screen coordinate."""
+def double_click(x: Optional[int] = None, y: Optional[int] = None) -> Dict[str, Any]:
+    """Double-clicks at (x, y) or at current cursor position."""
     return click_coordinate(x, y, button="left", clicks=2)
 
 
-def right_click(x: int, y: int) -> Dict[str, Any]:
-    """Right-clicks at the specified screen coordinate."""
+def right_click(x: Optional[int] = None, y: Optional[int] = None) -> Dict[str, Any]:
+    """Right-clicks at (x, y) or at current cursor position."""
     return click_coordinate(x, y, button="right", clicks=1)
 
 
-def drag_mouse(start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 0.5) -> Dict[str, Any]:
+def middle_click(x: Optional[int] = None, y: Optional[int] = None) -> Dict[str, Any]:
+    """Middle-clicks at (x, y) or at current cursor position."""
+    return click_coordinate(x, y, button="middle", clicks=1)
+
+
+def move_mouse(x: int, y: int, duration: float = 0.15) -> Dict[str, Any]:
+    """Moves mouse cursor to absolute (x, y) coordinates."""
+    try:
+        pyautogui.moveTo(x, y, duration=duration)
+        return {"success": True, "message": f"Moved mouse to ({x}, {y})."}
+    except Exception as e:
+        return {"success": False, "error": f"Move mouse failed: {str(e)}"}
+
+
+def move_mouse_relative(dx: int, dy: int, duration: float = 0.15) -> Dict[str, Any]:
+    """Moves mouse cursor relative to current position by (dx, dy)."""
+    try:
+        pyautogui.moveRel(dx, dy, duration=duration)
+        cur_x, cur_y = pyautogui.position()
+        return {"success": True, "message": f"Moved mouse by ({dx}, {dy}) to ({cur_x}, {cur_y})."}
+    except Exception as e:
+        return {"success": False, "error": f"Relative mouse move failed: {str(e)}"}
+
+
+def drag_mouse(start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 0.4) -> Dict[str, Any]:
     """Drags mouse from (start_x, start_y) to (end_x, end_y)."""
     try:
         pyautogui.moveTo(start_x, start_y)
@@ -80,7 +109,7 @@ def drag_mouse(start_x: int, start_y: int, end_x: int, end_y: int, duration: flo
         return {"success": False, "error": f"Drag failed: {str(e)}"}
 
 
-def type_text(text: str, interval: float = 0.01, press_enter: bool = False) -> Dict[str, Any]:
+def type_text(text: str, interval: float = 0.005, press_enter: bool = False) -> Dict[str, Any]:
     """
     Types text into the active window. Supports optionally pressing Enter after typing.
     """
@@ -95,7 +124,7 @@ def type_text(text: str, interval: float = 0.01, press_enter: bool = False) -> D
 
 def press_keys(keys: List[str]) -> Dict[str, Any]:
     """
-    Presses a sequence or combination of keys (e.g. ['ctrl', 'c'] or ['alt', 'tab'] or ['win', 'r']).
+    Presses a sequence or combination of keys (e.g. ['ctrl', 'c'] or ['alt', 'tab'] or ['enter']).
     """
     try:
         clean_keys = [k.strip().lower() for k in keys]
@@ -110,7 +139,7 @@ def press_keys(keys: List[str]) -> Dict[str, Any]:
 
 def scroll_screen(amount: int) -> Dict[str, Any]:
     """
-    Scrolls vertically. Positive number scrolls up, negative scrolls down.
+    Scrolls vertically. Positive scrolls up, negative scrolls down.
     """
     try:
         pyautogui.scroll(amount)
@@ -128,3 +157,13 @@ def switch_window() -> Dict[str, Any]:
 def close_active_window() -> Dict[str, Any]:
     """Closes the current active window using Alt+F4."""
     return press_keys(["alt", "f4"])
+
+
+def maximize_active_window() -> Dict[str, Any]:
+    """Maximizes current active window using Win+Up."""
+    return press_keys(["win", "up"])
+
+
+def minimize_active_window() -> Dict[str, Any]:
+    """Minimizes current active window using Win+Down."""
+    return press_keys(["win", "down"])

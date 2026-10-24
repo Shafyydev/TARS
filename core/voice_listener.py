@@ -18,7 +18,7 @@ class VoiceListener:
         "torch", "hello torch", "tarts", "target", "lotus"
     ]
 
-    def __init__(self, energy_threshold: int = 120, pause_threshold: float = 0.35):
+    def __init__(self, energy_threshold: int = 100, pause_threshold: float = 0.28):
         self.energy_threshold = energy_threshold
         self.pause_threshold = pause_threshold
         self._recognizer = None
@@ -33,10 +33,10 @@ class VoiceListener:
             import speech_recognition as sr
             self._recognizer = sr.Recognizer()
             self._recognizer.energy_threshold = self.energy_threshold
-            # Rapid end-of-phrase detection (cuts out 1.0+ second of trailing silence)
+            # Rapid end-of-phrase detection (cuts out trailing silence)
             self._recognizer.pause_threshold = self.pause_threshold
-            self._recognizer.non_speaking_duration = 0.2
-            self._recognizer.phrase_threshold = 0.15
+            self._recognizer.non_speaking_duration = 0.15
+            self._recognizer.phrase_threshold = 0.10
             self._recognizer.dynamic_energy_threshold = True
             self._recognizer.dynamic_energy_adjustment_damping = 0.15
             self._recognizer.dynamic_energy_ratio = 1.4

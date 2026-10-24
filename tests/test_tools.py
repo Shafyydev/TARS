@@ -95,6 +95,47 @@ class TestTARS(unittest.TestCase):
         self.assertTrue(res_switch["success"])
         self.assertEqual(res_switch["steps"][0]["tool"], "switch_window")
 
+    def test_presence_instant_response(self):
+        res = self.agent.run_agent_loop("where are you now")
+        self.assertTrue(res["success"])
+        self.assertIn("system memory", res["response"])
+
+        res_who = self.agent.run_agent_loop("who are you")
+        self.assertTrue(res_who["success"])
+        self.assertIn("TARS", res_who["response"])
+
+    def test_github_profile_navigation(self):
+        res = self.agent.run_agent_loop("go to my profile github")
+        self.assertTrue(res["success"])
+        self.assertEqual(res["steps"][0]["tool"], "launch_application")
+        self.assertIn("Shafyydev", res["steps"][0]["args"]["app_name"])
+
+    def test_gui_controls_fast_paths(self):
+        # Click
+        res_click = self.agent.run_agent_loop("click")
+        self.assertTrue(res_click["success"])
+        self.assertEqual(res_click["steps"][0]["tool"], "click_coordinate")
+
+        # Scroll
+        res_scroll = self.agent.run_agent_loop("scroll down")
+        self.assertTrue(res_scroll["success"])
+        self.assertEqual(res_scroll["steps"][0]["tool"], "scroll_screen")
+
+        # Enter key
+        res_enter = self.agent.run_agent_loop("press enter")
+        self.assertTrue(res_enter["success"])
+        self.assertEqual(res_enter["steps"][0]["tool"], "press_keys")
+
+        # New tab
+        res_tab = self.agent.run_agent_loop("new tab")
+        self.assertTrue(res_tab["success"])
+        self.assertEqual(res_tab["steps"][0]["tool"], "press_keys")
+
+        # Maximize
+        res_max = self.agent.run_agent_loop("maximize window")
+        self.assertTrue(res_max["success"])
+        self.assertEqual(res_max["steps"][0]["tool"], "maximize_active_window")
+
 
 if __name__ == "__main__":
     unittest.main()
