@@ -63,7 +63,7 @@ def render_hud(agent: TARSAgent) -> None:
 
 
 def test_microphone() -> None:
-    """Runs a 5-second microphone and transcription test."""
+    """Runs an instant microphone and speech-to-text benchmark."""
     console.print("\n[bold yellow]🎙️  Testing Microphone & Speech Recognition...[/bold yellow]")
     listener = VoiceListener()
     if not listener._recognizer or not listener._microphone:
@@ -71,16 +71,18 @@ def test_microphone() -> None:
         return
 
     console.print("[dim cyan]Calibrating ambient acoustics...[/dim cyan]")
-    thresh = listener.calibrate(duration=1)
+    thresh = listener.calibrate(duration=0.5)
     console.print(f"[green]✓ Ambient energy threshold set to: {int(thresh)}[/green]")
 
-    console.print("\n[bold green]Speak something into your microphone now (e.g. 'Hello TARS')...[/bold green]")
+    console.print("\n[bold green]Speak something into your microphone now (e.g. 'Hello TARS' or 'open Chrome')...[/bold green]")
+    t0 = time.time()
     text, status = listener.listen_once(timeout=8, phrase_time_limit=8)
+    elapsed = time.time() - t0
 
     if text:
-        console.print(f"\n[bold green]✓ SUCCESS! Microphone captured & transcribed:[/bold green] [bold white]\"{text}\"[/bold white]")
-        speaker = VoiceSpeaker()
-        speaker.speak(f"Microphone test successful. I heard {text}.", blocking=True)
+        console.print(f"\n[bold green]✓ SUCCESS! Captured in {elapsed:.2f}s:[/bold green] [bold white]\"{text}\"[/bold white]")
+        speaker = VoiceSpeaker(fast_voice=True)
+        speaker.speak(f"Test successful. Heard {text}.", blocking=True)
     else:
         console.print(f"\n[bold red]❌ No speech transcribed. Status: {status}[/bold red]")
         console.print("[dim yellow]Tips: Check your Windows Default Microphone volume in Settings > Sound.[/dim yellow]")
@@ -117,6 +119,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="TARS Autonomous Voice-Driven OS Control Agent")
     parser.add_argument("--text-only", action="store_true", help="Run in silent text-only mode (no audio output)")
     parser.add_argument("--voice", "--voice-only", dest="voice_mode", action="store_true", help="Run in continuous hands-free voice loop")
+    parser.add_argument("--fast-voice", action="store_true", help="Use zero-latency native Windows voice for maximum speed")
     parser.add_argument("--test-mic", action="store_true", help="Test microphone input and speech recognition")
     parser.add_argument("--diagnostics", action="store_true", help="Run hardware and tool diagnostics")
     args = parser.parse_args()
@@ -131,27 +134,28 @@ def main() -> None:
 
     # Initialize TARS Brain & Voice
     agent = TARSAgent()
-    speaker = VoiceSpeaker() if not args.text_only else None
+    speaker = VoiceSpeaker(fast_voice=args.fast_voice) if not args.text_only else None
     listener = VoiceListener() if (args.voice_mode or not args.text_only) else None
 
     render_hud(agent)
 
     if listener:
         with console.status("[dim cyan]Calibrating microphone for room acoustics...[/dim cyan]"):
-            listener.calibrate(duration=0.5)
+            listener.calibrate(duration=0.4)
 
     if speaker:
         speaker.speak("TARS operational. All systems online.", blocking=False)
 
     if args.voice_mode:
         console.print("[bold green]🎙️  CONTINUOUS HANDS-FREE VOICE CONTROL ENGAGED[/bold green]")
-        console.print("[white]Speak your command directly anytime. (e.g. [cyan]'open Chrome'[/cyan], [cyan]'volume 50'[/cyan], [cyan]'take a screenshot'[/cyan], [cyan]'TARS status'[/cyan])[/white]")
+        console.print("[white]Speak your command directly anytime. (e.g. [cyan]'open Chrome'[/cyan], [cyan]'volume 50'[/cyan], [cyan]'take a screenshot'[/cyan], [cyan]'status'[/cyan])[/white]")
         console.print("[dim white]Say [bold red]'exit'[/bold red] or [bold red]'disarm'[/bold red] to disarm TARS.[/dim white]\n")
     else:
         console.print("\n[bold white]Modes available:[/bold white]")
         console.print(" • Type your instructions directly.")
         console.print(" • Type [bold cyan]'v'[/bold cyan] or [bold cyan]'voice'[/bold cyan] to speak a single command via microphone.")
         console.print(" • Run with [bold green]python main.py --voice[/bold green] for continuous hands-free voice control.")
+        console.print(" • Add [bold green]--fast-voice[/bold green] for zero-latency instant offline speech responses.")
         console.print(" • Type [bold cyan]'exit'[/bold cyan] or [bold cyan]'quit'[/bold cyan] to disarm TARS.\n")
 
     while True:
@@ -160,15 +164,15 @@ def main() -> None:
 
             if args.voice_mode:
                 console.print("\n[bold green]🎙️  Listening... (Speak now)[/bold green]")
-                raw_speech, status = listener.listen_once(timeout=8, phrase_time_limit=12) if listener else (None, "no listener")
+                raw_speech, status = listener.listen_once(timeout=8, phrase_time_limit=10) if listener else (None, "no listener")
                 
                 if status == "timeout":
                     continue
                 elif status == "unrecognized":
-                    console.print("[dim yellow]⚡ Audio detected, but speech was unclear. Try speaking a bit clearer or closer.[/dim yellow]")
+                    console.print("[dim yellow]⚡ Audio detected, but speech was unclear. Try speaking slightly closer.[/dim yellow]")
                     continue
                 elif not raw_speech:
-                    time.sleep(0.1)
+                    time.sleep(0.05)
                     continue
 
                 # Check if wake word prefix was used, or use speech directly
@@ -180,7 +184,7 @@ def main() -> None:
                     if speaker:
                         speaker.speak("Standing by. What is your command?", blocking=True)
                     console.print("[bold yellow]🎙️  Listening for command...[/bold yellow]")
-                    follow_speech, _ = listener.listen_once(timeout=6, phrase_time_limit=10)
+                    follow_speech, _ = listener.listen_once(timeout=6, phrase_time_limit=8)
                     if not follow_speech:
                         continue
                     clean_command = follow_speech
@@ -188,7 +192,7 @@ def main() -> None:
                 user_input = clean_command if (is_ww and clean_command) else raw_speech
                 console.print(f"[bold cyan]🎙️  You said:[/bold cyan] [bold white]\"{user_input}\"[/bold white]")
 
-                # Immediate verbal acknowledgment
+                # Immediate zero-latency acknowledgment in parallel
                 if speaker:
                     speaker.speak_ack()
 
@@ -206,7 +210,7 @@ def main() -> None:
                 if user_input.strip().lower() in ["v", "voice"]:
                     if listener:
                         console.print("\n[bold yellow]🎙️  Listening... Speak your command clearly.[/bold yellow]")
-                        raw_speech, status = listener.listen_once(timeout=6, phrase_time_limit=10)
+                        raw_speech, status = listener.listen_once(timeout=6, phrase_time_limit=8)
                         if not raw_speech:
                             console.print(f"[dim red]No speech detected ({status}).[/dim red]")
                             continue
@@ -228,12 +232,14 @@ def main() -> None:
             def on_status(msg: str) -> None:
                 console.print(f"[dim yellow]⚡ {msg}[/dim yellow]")
 
-            # Run through Agent ReAct Loop
+            # Run through Agent ReAct Loop with precise timing
+            t_exec_start = time.time()
             with console.status("[bold green]TARS reasoning & executing...[/bold green]", spinner="dots"):
                 result = agent.run_agent_loop(user_input, on_status_update=on_status)
+            exec_duration = time.time() - t_exec_start
 
             # Output Spoken / Written Response
-            console.print(f"\n[bold green]TARS:[/bold green] {result['response']}\n")
+            console.print(f"\n[bold green]TARS:[/bold green] {result['response']} [dim green]({exec_duration:.2f}s)[/dim green]\n")
 
             # Show tool execution details if tools were used
             if result.get("steps"):
