@@ -27,7 +27,7 @@ from tools.gui_tools import (
     switch_window,
     close_active_window
 )
-from tools.browser_tools import open_url, search_web, fetch_webpage_summary
+from tools.browser_tools import open_url, search_web, fetch_webpage_summary, get_free_knowledge
 
 __all__ = [
     "SafetyValidator",
@@ -57,5 +57,6 @@ __all__ = [
     "close_active_window",
     "open_url",
     "search_web",
-    "fetch_webpage_summary"
+    "fetch_webpage_summary",
+    "get_free_knowledge"
 ]
