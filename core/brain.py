@@ -91,6 +91,84 @@ class TARSAgent:
         except Exception as e:
             return {"error": f"Exception executing tool '{tool_name}': {str(e)}"}
 
+    def _try_fast_path(self, prompt: str) -> Optional[Dict[str, Any]]:
+        """
+        Attempts direct local execution for unambiguous system commands with zero latency.
+        """
+        import re
+        p = prompt.strip().lower()
+
+        # Volume control (e.g., "set volume to 50", "volume 75")
+        vol_match = re.search(r"(?:set\s+)?volume\s+(?:to\s+)?(\d{1,3})", p)
+        if vol_match:
+            val = int(vol_match.group(1))
+            res = self.execute_tool("set_system_volume", {"level_percent": val})
+            return {
+                "response": f"Volume calibrated to {val} percent.",
+                "steps": [{"tool": "set_system_volume", "args": {"level_percent": val}, "result": res}],
+                "success": res.get("success", True)
+            }
+
+        # Media playback
+        if p in ["mute", "unmute", "toggle mute"]:
+            res = self.execute_tool("media_control", {"action": "mute"})
+            return {"response": "Toggled master audio mute.", "steps": [{"tool": "media_control", "args": {"action": "mute"}, "result": res}], "success": True}
+        
+        if p in ["play", "pause", "resume", "play music", "pause music"]:
+            res = self.execute_tool("media_control", {"action": "play_pause"})
+            return {"response": "Media playback toggled.", "steps": [{"tool": "media_control", "args": {"action": "play_pause"}, "result": res}], "success": True}
+
+        if any(kw in p for kw in ["next track", "next song", "skip track", "skip song"]):
+            res = self.execute_tool("media_control", {"action": "next"})
+            return {"response": "Skipped to next track.", "steps": [{"tool": "media_control", "args": {"action": "next"}, "result": res}], "success": True}
+
+        if any(kw in p for kw in ["previous track", "prev track", "prev song"]):
+            res = self.execute_tool("media_control", {"action": "prev"})
+            return {"response": "Restarted previous track.", "steps": [{"tool": "media_control", "args": {"action": "prev"}, "result": res}], "success": True}
+
+        # Minimize all / show desktop
+        if p in ["minimize all", "show desktop", "minimize windows", "desktop"]:
+            res = self.execute_tool("minimize_all_windows", {})
+            return {"response": "Desktop cleared. All windows minimized.", "steps": [{"tool": "minimize_all_windows", "args": {}, "result": res}], "success": True}
+
+        # Screenshot
+        if "screenshot" in p or "capture screen" in p:
+            res = self.execute_tool("take_screenshot", {})
+            path = res.get("filepath", "saved")
+            return {"response": f"Screenshot captured and secured.", "steps": [{"tool": "take_screenshot", "args": {}, "result": res}], "success": True}
+
+        # Telemetry / Status
+        if p in ["status", "telemetry", "system status", "specs", "hardware", "cpu usage"]:
+            telem = self.execute_tool("get_system_telemetry", {})
+            msg = f"CPU is at {telem['cpu_load_percent']}%, RAM load is {telem['ram_usage_percent']}%. Battery is {telem['battery']}."
+            return {"response": msg, "steps": [{"tool": "get_system_telemetry", "args": {}, "result": telem}], "success": True}
+
+        # Open application (e.g. "open chrome", "launch vs code", "start spotify")
+        open_match = re.match(r"(?:open|launch|start)\s+(.+)", p)
+        if open_match:
+            app_target = open_match.group(1).strip()
+            # If not a web URL
+            if not app_target.startswith("http") and not app_target.endswith(".com"):
+                res = self.execute_tool("launch_application", {"app_name": app_target})
+                return {
+                    "response": f"Launching {app_target}.",
+                    "steps": [{"tool": "launch_application", "args": {"app_name": app_target}, "result": res}],
+                    "success": res.get("success", True)
+                }
+
+        # Kill application (e.g. "kill chrome", "close notepad")
+        kill_match = re.match(r"(?:kill|close|terminate|exit)\s+(.+)", p)
+        if kill_match:
+            proc_target = kill_match.group(1).strip()
+            res = self.execute_tool("kill_process", {"process_name": proc_target})
+            return {
+                "response": f"Terminated {proc_target}.",
+                "steps": [{"tool": "kill_process", "args": {"process_name": proc_target}, "result": res}],
+                "success": res.get("success", True)
+            }
+
+        return None
+
     def run_agent_loop(self, user_prompt: str, on_status_update: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
         """
         Executes the ReAct loop for a user voice/text prompt.
@@ -105,11 +183,17 @@ class TARSAgent:
         self.memory.add_message("user", user_prompt)
         steps_log = []
 
+        # 1. Fast-Path Local Execution (Instant response for deterministic OS commands)
+        fast_result = self._try_fast_path(user_prompt)
+        if fast_result:
+            self.memory.add_message("assistant", fast_result["response"], fast_result["steps"])
+            return fast_result
+
+        # 2. Autonomous Multi-Step LLM Reasoning
         if not self.client:
-            # Fallback when GEMINI_API_KEY is not yet configured
             msg = (
                 "TARS is online, but GEMINI_API_KEY is not configured in your .env file. "
-                "Please add your API key to enable autonomous execution."
+                "Please add your API key to enable autonomous multi-step execution."
             )
             return {
                 "response": msg,

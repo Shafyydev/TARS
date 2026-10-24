@@ -47,6 +47,14 @@ class TestTARS(unittest.TestCase):
         self.assertEqual(len(msgs), 1)
         self.assertEqual(msgs[0]["content"], "Hello TARS")
 
+    def test_agent_fast_path(self):
+        from core.brain import TARSAgent
+        agent = TARSAgent()
+        res = agent.run_agent_loop("system status")
+        self.assertTrue(res["success"])
+        self.assertTrue(len(res["steps"]) > 0)
+        self.assertEqual(res["steps"][0]["tool"], "get_system_telemetry")
+
 
 if __name__ == "__main__":
     unittest.main()
