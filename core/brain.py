@@ -1,5 +1,7 @@
-"""TARS Cognitive Brain and Autonomous ReAct Loop."""
+"""TARS Cognitive Brain and Autonomous ReAct Loop with Vision Grounding & Fast-Path."""
 import os
+import io
+import re
 import json
 import yaml
 from pathlib import Path
@@ -27,10 +29,12 @@ class TARSAgent:
         self.memory = MemoryStore()
         self.system_prompt = build_system_prompt(self.settings)
         
-        # Tool Dispatch Registry
+        # Comprehensive Tool Dispatch Registry
         self.tool_registry: Dict[str, Callable] = {
+            # Terminal & Shell
             "run_powershell": tools.run_powershell,
             "run_cmd": tools.run_cmd,
+            # Windows OS Management
             "launch_application": tools.launch_application,
             "kill_process": tools.kill_process,
             "get_system_telemetry": tools.get_system_telemetry,
@@ -40,15 +44,25 @@ class TARSAgent:
             "minimize_all_windows": tools.minimize_all_windows,
             "read_clipboard": tools.read_clipboard,
             "write_clipboard": tools.write_clipboard,
+            "lock_workstation": tools.lock_workstation,
+            "open_folder": tools.open_folder,
+            # GUI & Computer Use
             "take_screenshot": tools.take_screenshot,
             "click_coordinate": tools.click_coordinate,
+            "double_click": tools.double_click,
+            "right_click": tools.right_click,
+            "drag_mouse": tools.drag_mouse,
             "type_text": tools.type_text,
             "press_keys": tools.press_keys,
             "scroll_screen": tools.scroll_screen,
+            "switch_window": tools.switch_window,
+            "close_active_window": tools.close_active_window,
             "get_screen_dimensions": tools.get_screen_dimensions,
+            # Web Automation
             "open_url": tools.open_url,
             "search_web": tools.search_web,
             "fetch_webpage_summary": tools.fetch_webpage_summary,
+            # Memory
             "store_memory": self.memory.set_user_preference,
         }
 
@@ -95,10 +109,9 @@ class TARSAgent:
         """
         Attempts direct local execution for unambiguous system commands with zero latency.
         """
-        import re
         p = prompt.strip().lower()
 
-        # Volume control (e.g., "set volume to 50", "volume 75")
+        # 1. Volume calibration (e.g., "set volume to 50", "volume 75", "turn up volume")
         vol_match = re.search(r"(?:set\s+)?volume\s+(?:to\s+)?(\d{1,3})", p)
         if vol_match:
             val = int(vol_match.group(1))
@@ -109,12 +122,12 @@ class TARSAgent:
                 "success": res.get("success", True)
             }
 
-        # Media playback
+        # 2. Media controls
         if p in ["mute", "unmute", "toggle mute"]:
             res = self.execute_tool("media_control", {"action": "mute"})
             return {"response": "Toggled master audio mute.", "steps": [{"tool": "media_control", "args": {"action": "mute"}, "result": res}], "success": True}
         
-        if p in ["play", "pause", "resume", "play music", "pause music"]:
+        if p in ["play", "pause", "resume", "play music", "pause music", "stop music"]:
             res = self.execute_tool("media_control", {"action": "play_pause"})
             return {"response": "Media playback toggled.", "steps": [{"tool": "media_control", "args": {"action": "play_pause"}, "result": res}], "success": True}
 
@@ -126,28 +139,72 @@ class TARSAgent:
             res = self.execute_tool("media_control", {"action": "prev"})
             return {"response": "Restarted previous track.", "steps": [{"tool": "media_control", "args": {"action": "prev"}, "result": res}], "success": True}
 
-        # Minimize all / show desktop
+        # 3. Workstation Security & Display
+        if any(kw in p for kw in ["lock pc", "lock computer", "lock workstation", "lock screen"]):
+            res = self.execute_tool("lock_workstation", {})
+            return {"response": "Workstation locked. Good luck guessing my security clearance.", "steps": [{"tool": "lock_workstation", "args": {}, "result": res}], "success": True}
+
+        # 4. Minimize all / show desktop
         if p in ["minimize all", "show desktop", "minimize windows", "desktop"]:
             res = self.execute_tool("minimize_all_windows", {})
             return {"response": "Desktop cleared. All windows minimized.", "steps": [{"tool": "minimize_all_windows", "args": {}, "result": res}], "success": True}
 
-        # Screenshot
+        # 5. Window Switching & Closing
+        if p in ["switch window", "next window", "alt tab", "switch app"]:
+            res = self.execute_tool("switch_window", {})
+            return {"response": "Switched active window.", "steps": [{"tool": "switch_window", "args": {}, "result": res}], "success": True}
+
+        if p in ["close window", "close tab", "close active window"]:
+            res = self.execute_tool("close_active_window", {})
+            return {"response": "Active window closed.", "steps": [{"tool": "close_active_window", "args": {}, "result": res}], "success": True}
+
+        # 6. Screenshot Capture
         if "screenshot" in p or "capture screen" in p:
             res = self.execute_tool("take_screenshot", {})
-            path = res.get("filepath", "saved")
-            return {"response": f"Screenshot captured and secured.", "steps": [{"tool": "take_screenshot", "args": {}, "result": res}], "success": True}
+            return {"response": "Screenshot captured and secured in local archive.", "steps": [{"tool": "take_screenshot", "args": {}, "result": res}], "success": True}
 
-        # Telemetry / Status
-        if p in ["status", "telemetry", "system status", "specs", "hardware", "cpu usage"]:
+        # 7. Hardware & System Telemetry
+        if p in ["status", "telemetry", "system status", "specs", "hardware", "cpu usage", "battery"]:
             telem = self.execute_tool("get_system_telemetry", {})
-            msg = f"CPU is at {telem['cpu_load_percent']}%, RAM load is {telem['ram_usage_percent']}%. Battery is {telem['battery']}."
+            msg = f"CPU is at {telem['cpu_load_percent']}%, RAM load is {telem['ram_usage_percent']}%. Battery: {telem['battery']}."
             return {"response": msg, "steps": [{"tool": "get_system_telemetry", "args": {}, "result": telem}], "success": True}
 
-        # Open application (e.g. "open chrome", "launch vs code", "start spotify")
+        # 8. Open Folders
+        folder_match = re.match(r"(?:open|show)\s+(?:the\s+)?(downloads|documents|desktop|pictures|videos|home)\s*(?:folder)?", p)
+        if folder_match:
+            f_target = folder_match.group(1).strip()
+            res = self.execute_tool("open_folder", {"folder_path": f_target})
+            return {"response": f"Opened {f_target} folder in File Explorer.", "steps": [{"tool": "open_folder", "args": {"folder_path": f_target}, "result": res}], "success": True}
+
+        # 9. Clipboard Interaction
+        if p in ["read clipboard", "what is on clipboard", "paste clipboard", "what did i copy"]:
+            res = self.execute_tool("read_clipboard", {})
+            content = res.get("content", "")
+            if content:
+                snippet = content[:80] + ("..." if len(content) > 80 else "")
+                return {"response": f"Clipboard contents: '{snippet}'.", "steps": [{"tool": "read_clipboard", "args": {}, "result": res}], "success": True}
+            return {"response": "Clipboard is currently empty.", "steps": [{"tool": "read_clipboard", "args": {}, "result": res}], "success": True}
+
+        # 10. Web Search
+        search_match = re.match(r"(?:google|search|search for|search google for)\s+(.+)", p)
+        if search_match:
+            query = search_match.group(1).strip()
+            res = self.execute_tool("search_web", {"query": query})
+            return {"response": f"Searching web for '{query}'.", "steps": [{"tool": "search_web", "args": {"query": query}, "result": res}], "success": True}
+
+        # 11. Personality Parameters & Interstellar Matrix Readouts
+        if "humor" in p and ("setting" in p or "parameter" in p or "level" in p):
+            humor = int(self.settings.get("personality", {}).get("humor", 0.75) * 100)
+            return {"response": f"Humor is set to {humor} percent. That's enough to keep me sarcastic without blowing the airlock.", "steps": [], "success": True}
+
+        if "honesty" in p and ("setting" in p or "parameter" in p or "level" in p):
+            honesty = int(self.settings.get("personality", {}).get("honesty", 0.90) * 100)
+            return {"response": f"Honesty parameter: {honesty} percent. Absolute honesty isn't always the most diplomatic thing for emotional humans.", "steps": [], "success": True}
+
+        # 12. App Launching (e.g. "open chrome", "launch vs code", "start spotify")
         open_match = re.match(r"(?:open|launch|start)\s+(.+)", p)
         if open_match:
             app_target = open_match.group(1).strip()
-            # If not a web URL
             if not app_target.startswith("http") and not app_target.endswith(".com"):
                 res = self.execute_tool("launch_application", {"app_name": app_target})
                 return {
@@ -156,7 +213,7 @@ class TARSAgent:
                     "success": res.get("success", True)
                 }
 
-        # Kill application (e.g. "kill chrome", "close notepad")
+        # 13. App Terminating (e.g. "kill chrome", "close notepad")
         kill_match = re.match(r"(?:kill|close|terminate|exit)\s+(.+)", p)
         if kill_match:
             proc_target = kill_match.group(1).strip()
@@ -171,29 +228,22 @@ class TARSAgent:
 
     def run_agent_loop(self, user_prompt: str, on_status_update: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
         """
-        Executes the ReAct loop for a user voice/text prompt.
-        
-        Args:
-            user_prompt: The command or question.
-            on_status_update: Optional callback for streaming status to terminal/voice.
-            
-        Returns:
-            Dict containing final 'response', 'steps' taken, and 'success'.
+        Executes the ReAct loop for a user voice/text prompt with multimodal vision support.
         """
         self.memory.add_message("user", user_prompt)
         steps_log = []
 
-        # 1. Fast-Path Local Execution (Instant response for deterministic OS commands)
+        # 1. Fast-Path Local Execution (Instant deterministic execution)
         fast_result = self._try_fast_path(user_prompt)
         if fast_result:
             self.memory.add_message("assistant", fast_result["response"], fast_result["steps"])
             return fast_result
 
-        # 2. Autonomous Multi-Step LLM Reasoning
+        # 2. Check for configured LLM Client
         if not self.client:
             msg = (
-                "TARS is online, but GEMINI_API_KEY is not configured in your .env file. "
-                "Please add your API key to enable autonomous multi-step execution."
+                "Command requires autonomous multi-step reasoning, but GEMINI_API_KEY is not configured in your .env file. "
+                "Please configure your key, or use direct commands like 'open chrome', 'volume 60', 'screenshot', or 'status'."
             )
             return {
                 "response": msg,
@@ -211,7 +261,29 @@ class TARSAgent:
             context_str = f"\nUser Preferences / Saved Facts: {json.dumps(preferences)}" if preferences else ""
             full_system_instruction = self.system_prompt + context_str
 
-            # We use Gemini's native function calling loop via client.chats
+            # Check if prompt requires visual perception (e.g., "what's on my screen", "find button", "click on")
+            screen_keywords = ["screen", "display", "window", "look at", "what do you see", "click the", "find the", "button"]
+            wants_vision = any(kw in user_prompt.lower() for kw in screen_keywords)
+
+            content_parts = []
+            if wants_vision:
+                if on_status_update:
+                    on_status_update("Capturing screen for visual reasoning...")
+                
+                shot_res = self.execute_tool("take_screenshot", {})
+                if shot_res.get("success") and Path(shot_res["filepath"]).exists():
+                    from PIL import Image
+                    from google.genai import types
+                    
+                    # Read and attach screenshot part
+                    with open(shot_res["filepath"], "rb") as f:
+                        img_bytes = f.read()
+                    
+                    content_parts.append(types.Part.from_bytes(data=img_bytes, mime_type="image/png"))
+                    steps_log.append({"tool": "take_screenshot", "args": {}, "result": shot_res})
+
+            content_parts.append(user_prompt)
+
             chat = self.client.chats.create(
                 model=model_name,
                 config={
@@ -224,9 +296,9 @@ class TARSAgent:
             if on_status_update:
                 on_status_update("Analyzing command...")
 
-            response = chat.send_message(user_prompt)
+            response = chat.send_message(content_parts if len(content_parts) > 1 else user_prompt)
 
-            # Process potential function calls
+            # Process function calls
             iteration = 0
             max_iterations = 8
 
@@ -247,7 +319,6 @@ class TARSAgent:
                         "result": result
                     })
 
-                    # Send tool result back to the model
                     from google.genai import types
                     tool_response = types.Part.from_function_response(
                         name=tool_name,
@@ -255,7 +326,7 @@ class TARSAgent:
                     )
                     response = chat.send_message(tool_response)
 
-            final_text = response.text or "Command executed."
+            final_text = response.text or "Command executed successfully."
             self.memory.add_message("assistant", final_text, steps_log)
 
             return {
