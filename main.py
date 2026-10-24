@@ -62,6 +62,30 @@ def render_hud(agent: TARSAgent) -> None:
     console.print(Panel(info_table, title="[bold cyan]SYSTEM TELEMETRY & MATRICES[/bold cyan]", border_style="cyan"))
 
 
+def test_microphone() -> None:
+    """Runs a 5-second microphone and transcription test."""
+    console.print("\n[bold yellow]🎙️  Testing Microphone & Speech Recognition...[/bold yellow]")
+    listener = VoiceListener()
+    if not listener._recognizer or not listener._microphone:
+        console.print("[bold red]❌ Microphone failed to initialize. Check Windows audio settings.[/bold red]")
+        return
+
+    console.print("[dim cyan]Calibrating ambient acoustics...[/dim cyan]")
+    thresh = listener.calibrate(duration=1)
+    console.print(f"[green]✓ Ambient energy threshold set to: {int(thresh)}[/green]")
+
+    console.print("\n[bold green]Speak something into your microphone now (e.g. 'Hello TARS')...[/bold green]")
+    text, status = listener.listen_once(timeout=8, phrase_time_limit=8)
+
+    if text:
+        console.print(f"\n[bold green]✓ SUCCESS! Microphone captured & transcribed:[/bold green] [bold white]\"{text}\"[/bold white]")
+        speaker = VoiceSpeaker()
+        speaker.speak(f"Microphone test successful. I heard {text}.", blocking=True)
+    else:
+        console.print(f"\n[bold red]❌ No speech transcribed. Status: {status}[/bold red]")
+        console.print("[dim yellow]Tips: Check your Windows Default Microphone volume in Settings > Sound.[/dim yellow]")
+
+
 def run_diagnostics() -> None:
     """Runs a quick hardware and tool self-test."""
     console.print("[bold yellow]Running TARS Core Tool Diagnostics...[/bold yellow]\n")
@@ -93,11 +117,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="TARS Autonomous Voice-Driven OS Control Agent")
     parser.add_argument("--text-only", action="store_true", help="Run in silent text-only mode (no audio output)")
     parser.add_argument("--voice", "--voice-only", dest="voice_mode", action="store_true", help="Run in continuous hands-free voice loop")
+    parser.add_argument("--test-mic", action="store_true", help="Test microphone input and speech recognition")
     parser.add_argument("--diagnostics", action="store_true", help="Run hardware and tool diagnostics")
     args = parser.parse_args()
 
     if args.diagnostics:
         run_diagnostics()
+        sys.exit(0)
+
+    if args.test_mic:
+        test_microphone()
         sys.exit(0)
 
     # Initialize TARS Brain & Voice
@@ -108,22 +137,21 @@ def main() -> None:
     render_hud(agent)
 
     if listener:
-        with console.status("[dim cyan]Calibrating microphone for ambient acoustics...[/dim cyan]"):
-            listener.calibrate(duration=1)
+        with console.status("[dim cyan]Calibrating microphone for room acoustics...[/dim cyan]"):
+            listener.calibrate(duration=0.5)
 
     if speaker:
         speaker.speak("TARS operational. All systems online.", blocking=False)
 
     if args.voice_mode:
         console.print("[bold green]🎙️  CONTINUOUS HANDS-FREE VOICE CONTROL ENGAGED[/bold green]")
-        console.print("[dim white]Say [bold cyan]'TARS'[/bold cyan] or [bold cyan]'Hey TARS'[/bold cyan] followed by your command.[/dim white]")
-        console.print("[dim white]Examples: 'TARS, open Chrome', 'TARS, volume 50', 'TARS, minimize windows', 'TARS, lock PC'[/dim white]")
-        console.print("[dim white]Say [bold red]'exit'[/bold red] or [bold red]'disarm'[/bold red] to shut down.[/dim white]\n")
+        console.print("[white]Speak your command directly anytime. (e.g. [cyan]'open Chrome'[/cyan], [cyan]'volume 50'[/cyan], [cyan]'take a screenshot'[/cyan], [cyan]'TARS status'[/cyan])[/white]")
+        console.print("[dim white]Say [bold red]'exit'[/bold red] or [bold red]'disarm'[/bold red] to disarm TARS.[/dim white]\n")
     else:
         console.print("\n[bold white]Modes available:[/bold white]")
         console.print(" • Type your instructions directly.")
-        console.print(" • Type [bold cyan]'v'[/bold cyan] or [bold cyan]'voice'[/bold cyan] to speak a command via microphone.")
-        console.print(" • Run with [bold green]python main.py --voice[/bold green] for 100% hands-free voice takeover.")
+        console.print(" • Type [bold cyan]'v'[/bold cyan] or [bold cyan]'voice'[/bold cyan] to speak a single command via microphone.")
+        console.print(" • Run with [bold green]python main.py --voice[/bold green] for continuous hands-free voice control.")
         console.print(" • Type [bold cyan]'exit'[/bold cyan] or [bold cyan]'quit'[/bold cyan] to disarm TARS.\n")
 
     while True:
@@ -131,29 +159,36 @@ def main() -> None:
             user_input = None
 
             if args.voice_mode:
-                console.print("[dim yellow]🎙️  Listening for 'TARS...'[/dim yellow]", end="\r")
-                raw_speech = listener.listen_once(timeout=6, phrase_time_limit=10) if listener else None
-                if not raw_speech:
+                console.print("\n[bold green]🎙️  Listening... (Speak now)[/bold green]")
+                raw_speech, status = listener.listen_once(timeout=8, phrase_time_limit=12) if listener else (None, "no listener")
+                
+                if status == "timeout":
+                    continue
+                elif status == "unrecognized":
+                    console.print("[dim yellow]⚡ Audio detected, but speech was unclear. Try speaking a bit clearer or closer.[/dim yellow]")
+                    continue
+                elif not raw_speech:
                     time.sleep(0.1)
                     continue
 
-                is_activated, clean_command = listener.check_wake_word(raw_speech)
-                if not is_activated:
-                    continue
-
-                # If only wake word was spoken with no command
-                if not clean_command:
-                    console.print(f"[bold cyan]You (Voice):[/bold cyan] {raw_speech}")
+                # Check if wake word prefix was used, or use speech directly
+                is_ww, clean_command = listener.check_wake_word(raw_speech)
+                
+                # If only wake word alone was said ("TARS"), ask user what they want
+                if is_ww and not clean_command:
+                    console.print(f"[bold cyan]🎙️  You said:[/bold cyan] [bold white]{raw_speech}[/bold white]")
                     if speaker:
                         speaker.speak("Standing by. What is your command?", blocking=True)
-                    clean_command = listener.listen_once(timeout=5, phrase_time_limit=8)
-                    if not clean_command:
+                    console.print("[bold yellow]🎙️  Listening for command...[/bold yellow]")
+                    follow_speech, _ = listener.listen_once(timeout=6, phrase_time_limit=10)
+                    if not follow_speech:
                         continue
+                    clean_command = follow_speech
 
-                user_input = clean_command
-                console.print(f"\n[bold cyan]You (Voice):[/bold cyan] {user_input}")
+                user_input = clean_command if (is_ww and clean_command) else raw_speech
+                console.print(f"[bold cyan]🎙️  You said:[/bold cyan] [bold white]\"{user_input}\"[/bold white]")
 
-                # Quick conversational acknowledgment
+                # Immediate verbal acknowledgment
                 if speaker:
                     speaker.speak_ack()
 
@@ -170,15 +205,14 @@ def main() -> None:
 
                 if user_input.strip().lower() in ["v", "voice"]:
                     if listener:
-                        console.print("[bold yellow]🎙️  Listening... Speak your command clearly.[/bold yellow]")
-                        raw_speech = listener.listen_once(timeout=6, phrase_time_limit=10)
+                        console.print("\n[bold yellow]🎙️  Listening... Speak your command clearly.[/bold yellow]")
+                        raw_speech, status = listener.listen_once(timeout=6, phrase_time_limit=10)
                         if not raw_speech:
-                            console.print("[dim red]No speech detected.[/dim red]")
+                            console.print(f"[dim red]No speech detected ({status}).[/dim red]")
                             continue
-                        _, user_input = listener.check_wake_word(raw_speech)
-                        if not user_input:
-                            user_input = raw_speech
-                        console.print(f"[bold cyan]You (Voice):[/bold cyan] {user_input}")
+                        is_ww, clean = listener.check_wake_word(raw_speech)
+                        user_input = clean if (is_ww and clean) else raw_speech
+                        console.print(f"[bold cyan]🎙️  You said:[/bold cyan] [bold white]\"{user_input}\"[/bold white]")
                     else:
                         console.print("[red]Microphone listener not initialized.[/red]")
                         continue
