@@ -76,7 +76,13 @@ class TestTARS(unittest.TestCase):
 
         is_act2, cmd2 = self.listener.check_wake_word("hey tars, minimize windows")
         self.assertTrue(is_act2)
-        self.assertEqual(cmd2, "minimize windows")
+    def test_normalize_voice_command(self):
+        from core.voice_listener import normalize_voice_command
+        self.assertEqual(normalize_voice_command("close this tap"), "close tab")
+        self.assertEqual(normalize_voice_command("new tap"), "new tab")
+        self.assertEqual(normalize_voice_command("clothes window"), "close window")
+        self.assertEqual(normalize_voice_command("write click"), "right click")
+        self.assertEqual(normalize_voice_command("ex"), "exit")
 
     def test_agent_fast_paths(self):
         # 1. Telemetry

@@ -4,6 +4,7 @@ import sys
 import time
 import argparse
 from pathlib import Path
+from typing import Optional
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -63,30 +64,45 @@ def render_hud(agent: TARSAgent) -> None:
     console.print(Panel(info_table, title="[bold cyan]SYSTEM TELEMETRY & MATRICES[/bold cyan]", border_style="cyan"))
 
 
-def test_microphone() -> None:
+def list_microphones() -> None:
+    """Lists all detected microphone devices with their system indices."""
+    import speech_recognition as sr
+    console.print("\n[bold cyan]🎙️  Available Audio Input Devices (Microphones):[/bold cyan]\n")
+    mics = sr.Microphone.list_microphone_names()
+    table = Table(border_style="cyan", show_header=True)
+    table.add_column("Index", style="yellow", justify="right")
+    table.add_column("Device Name", style="white")
+    for i, name in enumerate(mics):
+        table.add_row(str(i), name)
+    console.print(table)
+    console.print("\n[dim]To use a specific microphone, run:[/dim] [bold green]python main.py --voice --mic-index <Index>[/bold green]\n")
+
+
+def test_microphone(language: Optional[str] = None, mic_index: Optional[int] = None) -> None:
     """Runs an instant microphone and speech-to-text benchmark."""
     console.print("\n[bold yellow]🎙️  Testing Microphone & Speech Recognition...[/bold yellow]")
-    listener = VoiceListener()
+    listener = VoiceListener(language=language, mic_index=mic_index)
     if not listener._recognizer or not listener._microphone:
         console.print("[bold red]❌ Microphone failed to initialize. Check Windows audio settings.[/bold red]")
         return
 
+    console.print(f"[dim cyan]Acoustic Model: [bold white]{listener.language}[/bold white][/dim cyan]")
     console.print("[dim cyan]Calibrating ambient acoustics...[/dim cyan]")
-    thresh = listener.calibrate(duration=0.5)
-    console.print(f"[green]✓ Ambient energy threshold set to: {int(thresh)}[/green]")
+    thresh = listener.calibrate(duration=0.8)
+    console.print(f"[green]✓ Ambient energy threshold set to: {int(thresh)} (Adaptive VAD active)[/green]")
 
-    console.print("\n[bold green]Speak something into your microphone now (e.g. 'Hello TARS' or 'open Chrome')...[/bold green]")
+    console.print("\n[bold green]Speak something into your microphone now (e.g. 'Hello TARS' or 'close tab')...[/bold green]")
     t0 = time.time()
-    text, status = listener.listen_once(timeout=8, phrase_time_limit=8)
+    text, status = listener.listen_once(timeout=8, phrase_time_limit=10)
     elapsed = time.time() - t0
 
     if text:
         console.print(f"\n[bold green]✓ SUCCESS! Captured in {elapsed:.2f}s:[/bold green] [bold white]\"{text}\"[/bold white]")
         speaker = VoiceSpeaker(fast_voice=True)
-        speaker.speak(f"Test successful. Heard {text}.", blocking=True)
+        speaker.speak(f"Heard {text}.", blocking=True)
     else:
         console.print(f"\n[bold red]❌ No speech transcribed. Status: {status}[/bold red]")
-        console.print("[dim yellow]Tips: Check your Windows Default Microphone volume in Settings > Sound.[/dim yellow]")
+        console.print("[dim yellow]Tips: Check your Windows Default Microphone volume or run with --list-mics.[/dim yellow]")
 
 
 def run_diagnostics() -> None:
@@ -122,23 +138,30 @@ def main() -> None:
     parser.add_argument("--voice", "--voice-only", dest="voice_mode", action="store_true", help="Run in continuous hands-free voice loop")
     parser.add_argument("--neural-voice", action="store_true", help="Use cloud neural Edge-TTS voice (higher fidelity, but slower network latency)")
     parser.add_argument("--fast-voice", action="store_true", default=True, help="Use zero-latency native Windows voice for maximum speed (default)")
+    parser.add_argument("--language", type=str, default=None, help="Set STT language code (default auto-detected e.g. en-IN or en-US)")
+    parser.add_argument("--mic-index", type=int, default=None, help="Select input microphone device index")
+    parser.add_argument("--list-mics", action="store_true", help="List all available microphones and exit")
     parser.add_argument("--test-mic", action="store_true", help="Test microphone input and speech recognition")
     parser.add_argument("--diagnostics", action="store_true", help="Run hardware and tool diagnostics")
     args = parser.parse_args()
+
+    if args.list_mics:
+        list_microphones()
+        sys.exit(0)
 
     if args.diagnostics:
         run_diagnostics()
         sys.exit(0)
 
     if args.test_mic:
-        test_microphone()
+        test_microphone(language=args.language, mic_index=args.mic_index)
         sys.exit(0)
 
     # Initialize TARS Brain & Voice
     agent = TARSAgent()
     use_fast = not args.neural_voice
     speaker = VoiceSpeaker(fast_voice=use_fast) if not args.text_only else None
-    listener = VoiceListener() if (args.voice_mode or not args.text_only) else None
+    listener = VoiceListener(language=args.language, mic_index=args.mic_index) if (args.voice_mode or not args.text_only) else None
 
     render_hud(agent)
 
@@ -257,6 +280,9 @@ def main() -> None:
             # Speak response aloud (blocking in voice mode so mic doesn't capture TARS)
             if speaker and result.get("response"):
                 speaker.speak(result["response"], blocking=args.voice_mode)
+                if args.voice_mode:
+                    # Prevent acoustic feedback: clear audio device buffers before listening again
+                    time.sleep(0.3)
 
         except KeyboardInterrupt:
             console.print("\n[dim]TARS interrupted. Shutting down.[/dim]")
