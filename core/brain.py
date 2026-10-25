@@ -251,9 +251,13 @@ class TARSAgent:
                 "success": True
             }
 
-        if re.search(r"\bare\s+you\s+(there|listening|online)\b|\bcan\s+you\s+hear\s+me\b|\bping\b", p_clean):
+        # Silence / Stop talking / Shh / Quiet
+        if re.search(r"\b(stop\s+talking|be\s+quiet|shut\s+up|silence|shh|pause\s+talking)\b|^quiet$|^stop$", p_clean):
+            return {"response": "Standing by.", "steps": [], "success": True}
+
+        if re.search(r"\bare\s+you\s+(there|listening|online)\b|\b(?:can\s+you\s+)?hear\s+me\b|\bping\b", p_clean):
             return {
-                "response": "All audio and sensory channels operational. Ready for orders.",
+                "response": "Loud and clear. Standing by.",
                 "steps": [],
                 "success": True
             }
@@ -867,10 +871,7 @@ class TARSAgent:
                     self._cloud_quota_exceeded = True
 
         # 4. Universal Immediate Fallback (<1ms)
-        fallback_reply = (
-            f"Standing by. I heard '{user_prompt}', but did not detect a recognized system task. "
-            f"You can ask me to open apps, manage windows, create files, control volume, or run PowerShell commands."
-        )
+        fallback_reply = f"Standing by. I heard '{user_prompt}'. What is your command?"
         self.memory.add_message("assistant", fallback_reply, steps_log)
         return {
             "response": fallback_reply,

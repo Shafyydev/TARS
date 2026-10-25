@@ -174,7 +174,8 @@ def main() -> None:
 
     if args.voice_mode:
         console.print("[bold green]🎙️  CONTINUOUS HANDS-FREE VOICE CONTROL ENGAGED[/bold green]")
-        console.print("[white]Speak your command directly anytime. (e.g. [cyan]'open Chrome'[/cyan], [cyan]'volume 50'[/cyan], [cyan]'take a screenshot'[/cyan], [cyan]'status'[/cyan])[/white]")
+        console.print("[white]Speak your command directly anytime. (e.g. [cyan]'open Chrome'[/cyan], [cyan]'open d drive'[/cyan], [cyan]'volume 50'[/cyan], [cyan]'status'[/cyan])[/white]")
+        console.print("[dim cyan]⚡ Live Interruption: Tap any key (Space/Enter) or speak anytime to cut off speech instantly.[/dim cyan]")
         console.print("[dim white]Say [bold red]'exit'[/bold red] or [bold red]'disarm'[/bold red] to disarm TARS.[/dim white]\n")
     else:
         console.print("\n[bold white]Modes available:[/bold white]")
@@ -208,7 +209,7 @@ def main() -> None:
                 if is_ww and not clean_command:
                     console.print(f"[bold cyan]🎙️  You said:[/bold cyan] [bold white]{raw_speech}[/bold white]")
                     if speaker:
-                        speaker.speak("Standing by. What is your command?", blocking=True)
+                        speaker.speak("Standing by. What is your command?", blocking=True, listener=listener)
                     console.print("[bold yellow]🎙️  Listening for command...[/bold yellow]")
                     follow_speech, _ = listener.listen_once(timeout=5, phrase_time_limit=5)
                     if not follow_speech:
@@ -277,12 +278,18 @@ def main() -> None:
                     step_table.add_row(s["tool"], status)
                 console.print(step_table)
 
-            # Speak response aloud (blocking in voice mode so mic doesn't capture TARS)
+            # Speak response aloud (with instant keyboard interruption & acoustic voice barge-in)
             if speaker and result.get("response"):
-                speaker.speak(result["response"], blocking=args.voice_mode)
-                if args.voice_mode:
+                interrupted = speaker.speak(
+                    result["response"],
+                    blocking=args.voice_mode,
+                    listener=listener if args.voice_mode else None
+                )
+                if interrupted:
+                    console.print("[dim yellow]⚡ Speech interrupted by user. Standing by...[/dim yellow]")
+                elif args.voice_mode:
                     # Prevent acoustic feedback: clear audio device buffers before listening again
-                    time.sleep(0.3)
+                    time.sleep(0.15)
 
         except KeyboardInterrupt:
             console.print("\n[dim]TARS interrupted. Shutting down.[/dim]")

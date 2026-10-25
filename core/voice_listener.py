@@ -3,7 +3,10 @@ import os
 import time
 import re
 import locale
-from typing import Optional, Tuple, Callable
+import threading
+import struct
+import math
+from typing import Optional, Tuple, Callable, Any
 
 
 def detect_system_stt_language() -> str:
@@ -218,3 +221,71 @@ class VoiceListener:
             return None, "unrecognized"
         except Exception as e:
             return None, f"error: {str(e)}"
+
+    def create_barge_in_monitor(self) -> Optional["VoiceBargeInMonitor"]:
+        """Creates a barge-in audio energy monitor calibrated to current room acoustics."""
+        if not self._recognizer or not self._microphone:
+            return None
+        # Safe threshold: at least 500 and 2.0x current energy threshold to reject speaker bleed
+        thresh = max(500, int(self._recognizer.energy_threshold * 2.0))
+        return VoiceBargeInMonitor(self._recognizer, self._microphone, energy_threshold=thresh)
+
+
+class VoiceBargeInMonitor:
+    """
+    Lightweight audio energy monitor that listens to the microphone
+    during TTS speech playback to trigger instant voice barge-in.
+    """
+
+    def __init__(self, recognizer: Any, microphone: Any, energy_threshold: int = 500):
+        self.recognizer = recognizer
+        self.microphone = microphone
+        self.energy_threshold = energy_threshold
+        self._stop_event = threading.Event()
+        self._triggered = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def start(self) -> None:
+        """Starts background monitoring."""
+        if not self.microphone or not self.recognizer:
+            return
+        self._stop_event.clear()
+        self._triggered.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        """Stops background monitoring."""
+        self._stop_event.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=0.15)
+
+    def is_triggered(self) -> bool:
+        """Returns True if user voice energy exceeded threshold."""
+        return self._triggered.is_set()
+
+    def _run(self) -> None:
+        try:
+            with self.microphone as source:
+                consecutive = 0
+                while not self._stop_event.is_set():
+                    try:
+                        raw = source.stream.read(source.CHUNK)
+                        if not raw:
+                            continue
+                        count = len(raw) // 2
+                        shorts = struct.unpack(f"{count}h", raw)
+                        sum_squares = sum(s * s for s in shorts)
+                        rms = int(math.sqrt(sum_squares / max(1, count)))
+                        if rms >= self.energy_threshold:
+                            consecutive += 1
+                            # 2 consecutive frames (~80ms) above threshold confirms speech
+                            if consecutive >= 2:
+                                self._triggered.set()
+                                break
+                        else:
+                            consecutive = max(0, consecutive - 1)
+                    except Exception:
+                        break
+        except Exception:
+            pass

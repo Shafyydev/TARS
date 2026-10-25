@@ -248,6 +248,31 @@ class TestTARS(unittest.TestCase):
         self.assertEqual(res_addr["steps"][0]["tool"], "press_keys")
         self.assertEqual(res_addr["steps"][0]["args"]["keys"], ["alt", "d"])
 
+    def test_voice_interruption_and_silence(self):
+        # 1. Silence & stop talking command
+        res_stop = self.agent.run_agent_loop("stop talking")
+        self.assertTrue(res_stop["success"])
+        self.assertEqual(res_stop["response"], "Standing by.")
+
+        res_quiet = self.agent.run_agent_loop("be quiet")
+        self.assertTrue(res_quiet["success"])
+        self.assertEqual(res_quiet["response"], "Standing by.")
+
+        # 2. Presence & hear me query
+        res_hear = self.agent.run_agent_loop("can you hear me")
+        self.assertTrue(res_hear["success"])
+        self.assertIn("Loud and clear", res_hear["response"])
+
+        # 3. Speaker stop capability
+        self.speaker.stop()
+        self.assertFalse(self.speaker.is_speaking)
+
+        # 4. Barge-in monitor creation
+        monitor = self.listener.create_barge_in_monitor()
+        if monitor:
+            self.assertFalse(monitor.is_triggered())
+            monitor.stop()
+
 
 if __name__ == "__main__":
     unittest.main()
