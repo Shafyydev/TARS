@@ -1,8 +1,9 @@
 """Operating System and hardware management tools for Windows."""
 import os
+import re
 import subprocess
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import psutil
 
 # Predefined application & web destination mappings for fast voice launching
@@ -76,6 +77,11 @@ def launch_application(app_name: str) -> Dict[str, Any]:
         url = clean_name if clean_name.startswith("http") else f"https://{clean_name}"
         cmd = f"start {url}"
     else:
+        # Check if the target is a drive, directory, or known folder before Windows start
+        resolved_folder = resolve_system_target(app_name)
+        if resolved_folder and resolved_folder.exists():
+            return open_folder(str(resolved_folder))
+
         # Fallback to direct Windows start
         cmd = f"start \"\" \"{app_name}\""
 
@@ -307,22 +313,134 @@ def get_real_folder(name: str) -> Path:
     return Path.home() / clean.capitalize()
 
 
+def resolve_system_target(target: str) -> Optional[Path]:
+    """
+    Intelligently resolves natural language target strings (voice input) to concrete filesystem paths.
+    Handles:
+    - Drive letters: "d drive", "drive d", "d:", "c drive", "f drive", etc.
+    - Standard user shell folders: "desktop", "downloads", "documents", "pictures", "videos", "music", "home"
+    - Exact or fuzzy directory names across fixed drives and working directories:
+      "codehub", "code hub", "code hub folder", "tars", "movies", "games", "backlogs",
+      "backup", "attendance system", "projects"
+    - Absolute or relative paths: "D:\\codehub", "C:\\Users"
+    """
+    if not target or not isinstance(target, str):
+        return None
+
+    clean = target.strip().lower()
+
+    # Strip common leading voice commands
+    for prefix in ["go to ", "open up ", "open ", "navigate to ", "take me to ", "show me ", "visit ", "bring up "]:
+        if clean.startswith(prefix):
+            clean = clean[len(prefix):].strip()
+
+    # Strip common trailing and leading folder indicators
+    clean = re.sub(r"\s+(?:folder|directory|dir)$", "", clean).strip()
+    clean = re.sub(r"^(?:folder|directory|dir)\s+", "", clean).strip()
+    clean = re.sub(r"^(?:the|my)\s+", "", clean).strip()
+
+    if not clean:
+        return None
+
+    # 1. Drive check (e.g. "d drive", "drive d", "d:", "c drive", "d")
+    drive_match = re.search(r"\b([a-zA-Z])\s*(?:drive|disk)\b|\b(?:drive|disk)\s*([a-zA-Z])\b|^([a-zA-Z]):\\?$|^([a-zA-Z])$", clean)
+    if drive_match:
+        letter = (drive_match.group(1) or drive_match.group(2) or drive_match.group(3) or drive_match.group(4)).upper()
+        p = Path(f"{letter}:\\")
+        if p.exists():
+            return p
+
+    # 2. Known Windows User Shell Folders (Desktop, Downloads, Documents, etc.)
+    if clean in ["desktop", "downloads", "documents", "pictures", "videos", "music", "home", "onedrive"]:
+        return get_real_folder(clean)
+
+    # 3. Direct path or environment variable path
+    try:
+        p_direct = Path(clean)
+        if p_direct.exists():
+            return p_direct
+        p_exp = Path(os.path.expandvars(os.path.expanduser(clean)))
+        if p_exp.exists():
+            return p_exp
+    except Exception:
+        pass
+
+    # 4. Search across priority roots
+    norm_q = re.sub(r"[^a-z0-9]", "", clean)
+    if not norm_q:
+        return None
+
+    roots: List[Path] = []
+
+    # Priority order:
+    # 1) Current working directory and parent (e.g. D:\codehub\TARS, D:\codehub)
+    cwd = Path.cwd()
+    if cwd.parent.exists() and cwd.parent not in roots:
+        roots.append(cwd.parent)
+    if cwd.exists() and cwd not in roots:
+        roots.append(cwd)
+
+    # 2) Primary project drive (D:\)
+    d_drive = Path("D:\\")
+    if d_drive.exists() and d_drive not in roots:
+        roots.append(d_drive)
+
+    # 3) User folders & OneDrive
+    for extra in [Path.home() / "OneDrive", Path.home(), get_real_folder("desktop"), get_real_folder("documents"), get_real_folder("downloads")]:
+        if extra and extra.exists() and extra not in roots:
+            roots.append(extra)
+
+    # 4) Add other disk partitions (F:\, C:\)
+    try:
+        for part in psutil.disk_partitions():
+            m = Path(part.mountpoint)
+            if m.exists() and m not in roots:
+                roots.append(m)
+    except Exception:
+        pass
+
+    # Pass 1: Exact normalized match
+    for root in roots:
+        try:
+            for item in root.iterdir():
+                if item.is_dir():
+                    norm_item = re.sub(r"[^a-z0-9]", "", item.name.lower())
+                    if norm_item == norm_q:
+                        return item
+        except (PermissionError, OSError):
+            continue
+
+    # Pass 2: Substring / Prefix match (min length 3 to avoid false positives)
+    if len(norm_q) >= 3:
+        for root in roots:
+            try:
+                for item in root.iterdir():
+                    if item.is_dir():
+                        norm_item = re.sub(r"[^a-z0-9]", "", item.name.lower())
+                        if norm_q in norm_item or (len(norm_item) >= 3 and norm_item in norm_q):
+                            return item
+            except (PermissionError, OSError):
+                continue
+
+    return None
+
+
 def open_folder(folder_path: str = "downloads") -> Dict[str, Any]:
     """
-    Opens a folder in Windows File Explorer with automatic OneDrive & User Shell Folder resolution.
+    Opens a folder or drive in Windows File Explorer with automatic OneDrive,
+    drive letter, and dynamic directory resolution.
     """
-    clean_target = folder_path.strip().lower()
-    if clean_target in ["downloads", "documents", "desktop", "pictures", "videos", "music", "home"]:
-        target_path = get_real_folder(clean_target)
-    else:
-        target_path = Path(folder_path)
-
-    if not target_path.exists():
-        return {"success": False, "error": f"Folder '{folder_path}' does not exist."}
+    target_path = resolve_system_target(folder_path)
+    if not target_path or not target_path.exists():
+        direct = Path(folder_path)
+        if direct.exists():
+            target_path = direct
+        else:
+            return {"success": False, "error": f"Folder or drive '{folder_path}' does not exist."}
 
     try:
         os.startfile(str(target_path))
-        return {"success": True, "message": f"Opened folder: {target_path}"}
+        return {"success": True, "message": f"Opened folder: {target_path}", "path": str(target_path)}
     except Exception as e:
         return {"success": False, "error": f"Could not open folder: {e}"}
 

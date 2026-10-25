@@ -384,7 +384,7 @@ class TARSAgent:
                 "success": True
             }
 
-        if re.search(r"\b(press|hit)?\s*(enter|return)\s*(key)?\b", p_clean):
+        if re.search(r"\b(press|hit)?\s*(enter|return)\s*(key)?\b|\b(click\s+ok|press\s+ok|hit\s+ok)\b|^ok$", p_clean):
             res = self.execute_tool("press_keys", {"keys": ["enter"]})
             return {"response": "Pressed enter.", "steps": [{"tool": "press_keys", "args": {"keys": ["enter"]}, "result": res}], "success": True}
 
@@ -396,9 +396,9 @@ class TARSAgent:
             res = self.execute_tool("press_keys", {"keys": ["tab"]})
             return {"response": "Pressed tab.", "steps": [{"tool": "press_keys", "args": {"keys": ["tab"]}, "result": res}], "success": True}
 
-        if re.search(r"\b(press|hit)?\s*(escape|esc)\s*(key)?\b", p_clean):
+        if re.search(r"\b(press|hit)?\s*(escape|esc)\s*(key)?\b|\b(?:close|dismiss|cancel)\s+(?:popup|dialog|modal|alert|error|message)\b|^cancel$", p_clean):
             res = self.execute_tool("press_keys", {"keys": ["escape"]})
-            return {"response": "Pressed escape.", "steps": [{"tool": "press_keys", "args": {"keys": ["escape"]}, "result": res}], "success": True}
+            return {"response": "Dismissed popup dialog.", "steps": [{"tool": "press_keys", "args": {"keys": ["escape"]}, "result": res}], "success": True}
 
         if re.search(r"\b(press|hit)?\s*(backspace)\s*(key)?\b", p_clean):
             res = self.execute_tool("press_keys", {"keys": ["backspace"]})
@@ -408,10 +408,10 @@ class TARSAgent:
             res = self.execute_tool("press_keys", {"keys": ["delete"]})
             return {"response": "Pressed delete.", "steps": [{"tool": "press_keys", "args": {"keys": ["delete"]}, "result": res}], "success": True}
 
-        # 7. Browser Page Navigation
+        # 7. Navigation & Explorer GUI Controls
         if re.search(r"\b(refresh|reload)\b", p_clean):
             res = self.execute_tool("press_keys", {"keys": ["f5"]})
-            return {"response": "Refreshed page.", "steps": [{"tool": "press_keys", "args": {"keys": ["f5"]}, "result": res}], "success": True}
+            return {"response": "Refreshed.", "steps": [{"tool": "press_keys", "args": {"keys": ["f5"]}, "result": res}], "success": True}
 
         if re.search(r"\b(go\s+)?back\b|\bprevious\s+page\b", p_clean):
             res = self.execute_tool("press_keys", {"keys": ["alt", "left"]})
@@ -421,9 +421,21 @@ class TARSAgent:
             res = self.execute_tool("press_keys", {"keys": ["alt", "right"]})
             return {"response": "Navigated forward.", "steps": [{"tool": "press_keys", "args": {"keys": ["alt", "right"]}, "result": res}], "success": True}
 
-        if re.search(r"\b(address\s+bar|url\s+bar|focus\s+url)\b", p_clean):
-            res = self.execute_tool("press_keys", {"keys": ["ctrl", "l"]})
-            return {"response": "Address bar focused.", "steps": [{"tool": "press_keys", "args": {"keys": ["ctrl", "l"]}, "result": res}], "success": True}
+        if re.search(r"\b(go\s+up|up\s+one\s+level|parent\s+folder|parent\s+directory)\b|^up$", p_clean):
+            res = self.execute_tool("press_keys", {"keys": ["alt", "up"]})
+            return {"response": "Navigated up one level.", "steps": [{"tool": "press_keys", "args": {"keys": ["alt", "up"]}, "result": res}], "success": True}
+
+        if re.search(r"\b(address\s+bar|url\s+bar|focus\s+url|focus\s+address)\b", p_clean):
+            res = self.execute_tool("press_keys", {"keys": ["alt", "d"]})
+            return {"response": "Address bar focused.", "steps": [{"tool": "press_keys", "args": {"keys": ["alt", "d"]}, "result": res}], "success": True}
+
+        if re.search(r"\b(new\s+folder|create\s+new\s+folder|make\s+new\s+folder)\b", p_clean):
+            res = self.execute_tool("press_keys", {"keys": ["ctrl", "shift", "n"]})
+            return {"response": "Created new folder in active window.", "steps": [{"tool": "press_keys", "args": {"keys": ["ctrl", "shift", "n"]}, "result": res}], "success": True}
+
+        if re.search(r"\b(rename\s+file|rename\s+folder|rename\s+item|rename)\b", p_clean):
+            res = self.execute_tool("press_keys", {"keys": ["f2"]})
+            return {"response": "Rename activated.", "steps": [{"tool": "press_keys", "args": {"keys": ["f2"]}, "result": res}], "success": True}
 
         if re.search(r"\bzoom\s+in\b|\benlarge\b", p_clean):
             res = self.execute_tool("press_keys", {"keys": ["ctrl", "+"]})
@@ -716,26 +728,54 @@ class TARSAgent:
             res = self.execute_tool("system_power", {"action": "cancel"})
             return {"response": "Shutdown aborted.", "steps": [{"tool": "system_power", "args": {"action": "cancel"}, "result": res}], "success": True}
 
-        # 22. Application, Folder, and Website Navigation (Zero-Latency Local Launch)
+        # 22. Application, Folder, Drive, and Website Navigation (Zero-Latency Local Launch)
+        # Direct Drive navigation (e.g. "open d drive", "go to d drive", "d drive", "drive c", "f:")
+        drive_direct = re.search(r"^(?:(?:go\s+to|open|navigate\s+to|show\s+me)\s+)?(?:the\s+)?([a-zA-Z])\s+(?:drive|disk)$|^(?:(?:go\s+to|open|navigate\s+to|show\s+me)\s+)?(?:the\s+)?(?:drive|disk)\s+([a-zA-Z])$|^([a-zA-Z]):\\?$", p_clean)
+        if drive_direct:
+            letter = (drive_direct.group(1) or drive_direct.group(2) or drive_direct.group(3)).upper()
+            target_drive = f"{letter}:\\"
+            res = self.execute_tool("open_folder", {"folder_path": target_drive})
+            return {
+                "response": f"Opened {letter} drive in File Explorer.",
+                "steps": [{"tool": "open_folder", "args": {"folder_path": target_drive}, "result": res}],
+                "success": res.get("success", True)
+            }
+
         nav_match = re.match(r"^(?:go to|navigate to|visit|open up|open|launch|start|take me to|show me|bring up)\s+(?:the\s+)?(?:my\s+)?(.+)", p_clean)
         if nav_match:
             target = nav_match.group(1).strip()
-            # Folder detection
-            folder_clean = target.replace(" folder", "").strip()
-            if folder_clean in ["downloads", "documents", "desktop", "pictures", "videos", "home"]:
-                res = self.execute_tool("open_folder", {"folder_path": folder_clean})
+
+            # Priority 1: Check if target resolves to a drive, folder, or directory
+            resolved_p = tools.resolve_system_target(target)
+            if resolved_p and resolved_p.exists():
+                res = self.execute_tool("open_folder", {"folder_path": str(resolved_p)})
+                folder_name = resolved_p.name if resolved_p.name else str(resolved_p)
                 return {
-                    "response": f"Opening {folder_clean} folder.",
-                    "steps": [{"tool": "open_folder", "args": {"folder_path": folder_clean}, "result": res}],
-                    "success": True
+                    "response": f"Opened {folder_name} in File Explorer.",
+                    "steps": [{"tool": "open_folder", "args": {"folder_path": str(resolved_p)}, "result": res}],
+                    "success": res.get("success", True)
                 }
-            # App / Website launch
+
+            # Priority 2: Standard application or website launch
             res = self.execute_tool("launch_application", {"app_name": target})
             return {
                 "response": f"Opening {target}.",
                 "steps": [{"tool": "launch_application", "args": {"app_name": target}, "result": res}],
                 "success": res.get("success", True)
             }
+
+        # Standalone folder mention (e.g. "codehub", "code hub folder", "tars folder")
+        if not p_clean.startswith("create ") and not p_clean.startswith("delete "):
+            if any(kw in p_clean for kw in ["folder", "directory", "drive"]) or p_clean in ["codehub", "tars"]:
+                resolved_p = tools.resolve_system_target(p_clean)
+                if resolved_p and resolved_p.exists():
+                    res = self.execute_tool("open_folder", {"folder_path": str(resolved_p)})
+                    folder_name = resolved_p.name if resolved_p.name else str(resolved_p)
+                    return {
+                        "response": f"Opened {folder_name} in File Explorer.",
+                        "steps": [{"tool": "open_folder", "args": {"folder_path": str(resolved_p)}, "result": res}],
+                        "success": res.get("success", True)
+                    }
 
         # 19. App Terminating (e.g. "kill chrome", "close notepad", "exit spotify")
         kill_match = re.match(r"^(?:kill|terminate)\s+(?:the\s+)?(?:app\s+)?(.+)", p_clean)

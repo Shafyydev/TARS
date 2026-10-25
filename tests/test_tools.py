@@ -173,6 +173,81 @@ class TestTARS(unittest.TestCase):
         self.assertTrue(res_abort["success"])
         self.assertEqual(res_abort["steps"][0]["tool"], "system_power")
 
+    def test_resolve_system_target(self):
+        from tools.os_tools import resolve_system_target
+        from pathlib import Path
+        
+        # Test Drive resolution
+        d_path = resolve_system_target("d drive")
+        self.assertIsNotNone(d_path)
+        self.assertTrue(str(d_path).upper().startswith("D:"))
+
+        c_path = resolve_system_target("c drive")
+        self.assertIsNotNone(c_path)
+        self.assertTrue(str(c_path).upper().startswith("C:"))
+
+        # Test Known directory resolution
+        codehub_p = resolve_system_target("codehub")
+        self.assertIsNotNone(codehub_p)
+        self.assertIn("codehub", str(codehub_p).lower())
+
+        codehub_folder_p = resolve_system_target("code hub folder")
+        self.assertIsNotNone(codehub_folder_p)
+        self.assertIn("codehub", str(codehub_folder_p).lower())
+
+    def test_drive_and_folder_navigation(self):
+        # Open D drive
+        res_d = self.agent.run_agent_loop("open d drive")
+        self.assertTrue(res_d["success"])
+        self.assertEqual(res_d["steps"][0]["tool"], "open_folder")
+        self.assertIn("D:", res_d["steps"][0]["args"]["folder_path"].upper())
+
+        # Go to D drive
+        res_god = self.agent.run_agent_loop("go to d drive")
+        self.assertTrue(res_god["success"])
+        self.assertEqual(res_god["steps"][0]["tool"], "open_folder")
+
+        # Open code hub folder
+        res_ch = self.agent.run_agent_loop("open code hub folder")
+        self.assertTrue(res_ch["success"])
+        self.assertEqual(res_ch["steps"][0]["tool"], "open_folder")
+
+        # Go to codehub
+        res_gch = self.agent.run_agent_loop("go to codehub")
+        self.assertTrue(res_gch["success"])
+        self.assertEqual(res_gch["steps"][0]["tool"], "open_folder")
+
+    def test_explorer_gui_hotkeys(self):
+        # Go up one level
+        res_up = self.agent.run_agent_loop("go up")
+        self.assertTrue(res_up["success"])
+        self.assertEqual(res_up["steps"][0]["tool"], "press_keys")
+        self.assertEqual(res_up["steps"][0]["args"]["keys"], ["alt", "up"])
+
+        # Create new folder
+        res_nf = self.agent.run_agent_loop("new folder")
+        self.assertTrue(res_nf["success"])
+        self.assertEqual(res_nf["steps"][0]["tool"], "press_keys")
+        self.assertEqual(res_nf["steps"][0]["args"]["keys"], ["ctrl", "shift", "n"])
+
+        # Rename
+        res_rn = self.agent.run_agent_loop("rename")
+        self.assertTrue(res_rn["success"])
+        self.assertEqual(res_rn["steps"][0]["tool"], "press_keys")
+        self.assertEqual(res_rn["steps"][0]["args"]["keys"], ["f2"])
+
+        # Dismiss popup / cancel dialog
+        res_esc = self.agent.run_agent_loop("dismiss popup")
+        self.assertTrue(res_esc["success"])
+        self.assertEqual(res_esc["steps"][0]["tool"], "press_keys")
+        self.assertEqual(res_esc["steps"][0]["args"]["keys"], ["escape"])
+
+        # Focus address bar
+        res_addr = self.agent.run_agent_loop("address bar")
+        self.assertTrue(res_addr["success"])
+        self.assertEqual(res_addr["steps"][0]["tool"], "press_keys")
+        self.assertEqual(res_addr["steps"][0]["args"]["keys"], ["alt", "d"])
+
 
 if __name__ == "__main__":
     unittest.main()
