@@ -12,7 +12,13 @@ from tools.os_tools import (
     read_clipboard,
     write_clipboard,
     lock_workstation,
-    open_folder
+    open_folder,
+    create_file_or_folder,
+    delete_file_or_folder,
+    list_directory,
+    empty_recycle_bin,
+    get_network_info,
+    system_power
 )
 from tools.gui_tools import (
     take_screenshot,
@@ -49,6 +55,12 @@ __all__ = [
     "write_clipboard",
     "lock_workstation",
     "open_folder",
+    "create_file_or_folder",
+    "delete_file_or_folder",
+    "list_directory",
+    "empty_recycle_bin",
+    "get_network_info",
+    "system_power",
     "take_screenshot",
     "click_coordinate",
     "double_click",

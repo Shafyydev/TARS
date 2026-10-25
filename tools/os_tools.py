@@ -272,23 +272,50 @@ def lock_workstation() -> Dict[str, Any]:
         return {"success": False, "error": f"Failed to lock workstation: {e}"}
 
 
+def get_real_folder(name: str) -> Path:
+    """
+    Resolves standard Windows User Shell Folders (Desktop, Documents, Downloads, etc.)
+    with automatic support for OneDrive and custom redirections.
+    """
+    clean = name.strip().lower()
+    if clean in ["home", "user", "root"]:
+        return Path.home()
+
+    import winreg
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders")
+        reg_map = {
+            "desktop": "Desktop",
+            "documents": "Personal",
+            "downloads": "{374DE290-123F-4565-9164-39C4925E467B}",
+            "pictures": "My Pictures",
+            "videos": "My Video",
+            "music": "My Music"
+        }
+        val_name = reg_map.get(clean)
+        if val_name:
+            val, _ = winreg.QueryValueEx(key, val_name)
+            expanded = Path(os.path.expandvars(val))
+            if expanded.exists():
+                return expanded
+    except Exception:
+        pass
+
+    onedrive_p = Path.home() / "OneDrive" / clean.capitalize()
+    if onedrive_p.exists():
+        return onedrive_p
+    return Path.home() / clean.capitalize()
+
+
 def open_folder(folder_path: str = "downloads") -> Dict[str, Any]:
     """
-    Opens a folder in Windows File Explorer.
-    Supports keywords: 'downloads', 'documents', 'desktop', 'pictures', 'videos', or any absolute path.
+    Opens a folder in Windows File Explorer with automatic OneDrive & User Shell Folder resolution.
     """
-    user_home = Path.home()
-    folder_map = {
-        "downloads": user_home / "Downloads",
-        "documents": user_home / "Documents",
-        "desktop": user_home / "Desktop",
-        "pictures": user_home / "Pictures",
-        "videos": user_home / "Videos",
-        "home": user_home,
-    }
-
     clean_target = folder_path.strip().lower()
-    target_path = folder_map.get(clean_target, Path(folder_path))
+    if clean_target in ["downloads", "documents", "desktop", "pictures", "videos", "music", "home"]:
+        target_path = get_real_folder(clean_target)
+    else:
+        target_path = Path(folder_path)
 
     if not target_path.exists():
         return {"success": False, "error": f"Folder '{folder_path}' does not exist."}
@@ -298,3 +325,120 @@ def open_folder(folder_path: str = "downloads") -> Dict[str, Any]:
         return {"success": True, "message": f"Opened folder: {target_path}"}
     except Exception as e:
         return {"success": False, "error": f"Could not open folder: {e}"}
+
+
+def create_file_or_folder(item_type: str, name: str, location: str = "desktop", content: str = "") -> Dict[str, Any]:
+    """
+    Creates a new file or directory on Windows with optional content.
+    Supports location aliases: 'desktop', 'documents', 'downloads', 'home' or absolute paths.
+    """
+    clean_loc = location.strip().lower()
+    if clean_loc in ["desktop", "documents", "downloads", "pictures", "videos", "home"]:
+        base = get_real_folder(clean_loc)
+    else:
+        base = Path(location)
+
+    target = base / name
+    try:
+        if item_type.lower() in ["folder", "directory", "dir"]:
+            target.mkdir(parents=True, exist_ok=True)
+            return {"success": True, "message": f"Created folder '{name}' at {target}."}
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content or "", encoding="utf-8")
+            return {"success": True, "message": f"Created file '{name}' at {target}."}
+    except Exception as e:
+        return {"success": False, "error": f"Failed to create {item_type}: {e}"}
+
+
+def delete_file_or_folder(name: str, location: str = "desktop") -> Dict[str, Any]:
+    """
+    Safely deletes a file or directory from desktop/documents/downloads.
+    """
+    clean_loc = location.strip().lower()
+    if clean_loc in ["desktop", "documents", "downloads", "pictures", "videos", "home"]:
+        base = get_real_folder(clean_loc)
+    else:
+        base = Path(location)
+
+    target = base / name
+    if not target.exists():
+        return {"success": False, "message": f"Target '{name}' does not exist in {base}."}
+    try:
+        import shutil
+        if target.is_dir():
+            shutil.rmtree(str(target))
+        else:
+            target.unlink()
+        return {"success": True, "message": f"Deleted '{name}' successfully."}
+    except Exception as e:
+        return {"success": False, "error": f"Delete failed: {e}"}
+
+
+def list_directory(location: str = "desktop") -> Dict[str, Any]:
+    """
+    Lists the files and folders in a specified directory.
+    """
+    clean_loc = location.strip().lower()
+    if clean_loc in ["desktop", "documents", "downloads", "pictures", "videos", "music", "home"]:
+        base = get_real_folder(clean_loc)
+    else:
+        base = Path(location)
+
+    if not base.exists():
+        return {"success": False, "error": f"Directory '{location}' not found."}
+    try:
+        items = os.listdir(base)
+        display_items = items[:15]
+        summary = ", ".join(display_items)
+        if len(items) > 15:
+            summary += f" and {len(items)-15} more"
+        return {"success": True, "count": len(items), "items": items, "summary": summary}
+    except Exception as e:
+        return {"success": False, "error": f"Could not list directory: {e}"}
+
+
+def empty_recycle_bin() -> Dict[str, Any]:
+    """Empties the Windows Recycle Bin."""
+    try:
+        cmd = "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"
+        subprocess.run(["powershell", "-NoProfile", "-Command", cmd], capture_output=True, timeout=5)
+        return {"success": True, "message": "Recycle Bin emptied."}
+    except Exception as e:
+        return {"success": False, "error": f"Failed to empty Recycle Bin: {e}"}
+
+
+def get_network_info() -> Dict[str, Any]:
+    """Retrieves local IP address, hostname, and network status."""
+    try:
+        import socket
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+        return {"success": True, "hostname": hostname, "local_ip": local_ip}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def system_power(action: str, delay_sec: int = 0) -> Dict[str, Any]:
+    """
+    Controls Windows system power states: 'sleep', 'restart', 'shutdown', 'cancel'.
+    """
+    act = action.strip().lower()
+    try:
+        if act == "sleep":
+            subprocess.run(["powershell", "-Command", "rundll32.exe powrprof.dll,SetSuspendState 0,1,0"], timeout=3)
+            return {"success": True, "message": "Entering sleep mode."}
+        elif act in ["restart", "reboot"]:
+            cmd = f"shutdown /r /t {delay_sec}"
+            subprocess.run(["cmd.exe", "/c", cmd], timeout=3)
+            return {"success": True, "message": f"System reboot scheduled in {delay_sec} seconds."}
+        elif act in ["shutdown", "shut down", "power off"]:
+            cmd = f"shutdown /s /t {delay_sec}"
+            subprocess.run(["cmd.exe", "/c", cmd], timeout=3)
+            return {"success": True, "message": f"System shutdown scheduled in {delay_sec} seconds."}
+        elif act in ["cancel", "abort"]:
+            subprocess.run(["cmd.exe", "/c", "shutdown /a"], timeout=3)
+            return {"success": True, "message": "Scheduled shutdown or restart aborted."}
+        return {"success": False, "error": f"Unknown power action '{action}'."}
+    except Exception as e:
+        return {"success": False, "error": f"Power command failed: {e}"}

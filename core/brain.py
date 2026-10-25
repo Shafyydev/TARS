@@ -91,6 +91,12 @@ class TARSAgent:
             "write_clipboard": tools.write_clipboard,
             "lock_workstation": tools.lock_workstation,
             "open_folder": tools.open_folder,
+            "create_file_or_folder": tools.create_file_or_folder,
+            "delete_file_or_folder": tools.delete_file_or_folder,
+            "list_directory": tools.list_directory,
+            "empty_recycle_bin": tools.empty_recycle_bin,
+            "get_network_info": tools.get_network_info,
+            "system_power": tools.system_power,
             # GUI & Computer Use
             "take_screenshot": tools.take_screenshot,
             "click_coordinate": tools.click_coordinate,
@@ -167,6 +173,68 @@ class TARSAgent:
         # Clean conversational prefixes and suffixes
         p_clean = re.sub(r"^(?:can you|could you|please|would you|tars|hey tars|yo tars|ok tars|okay tars)\s+", "", p).strip("?!.,; ")
         p_clean = re.sub(r"\s+(?:tars|please)$", "", p_clean).strip("?!.,; ")
+
+        # 0. Chained & Compound Action Sequences
+        # Compound: "open <app> and (?:type|write|input) <text>"
+        open_and_type = re.match(r"^(?:open|launch|start)\s+([a-zA-Z0-9\s]+?)\s+and\s+(?:type|write|input)\s+(.+)$", p_clean)
+        if open_and_type:
+            app_target = open_and_type.group(1).strip()
+            text_to_type = open_and_type.group(2).strip()
+            press_enter = False
+            for sfx in [" and enter", " and hit enter", " and press enter"]:
+                if text_to_type.endswith(sfx):
+                    text_to_type = text_to_type[:-len(sfx)].strip()
+                    press_enter = True
+                    break
+            step1 = self.execute_tool("launch_application", {"app_name": app_target})
+            time.sleep(0.5)
+            step2 = self.execute_tool("type_text", {"text": text_to_type, "press_enter": press_enter})
+            return {
+                "response": f"Opened {app_target} and typed '{text_to_type}'.",
+                "steps": [
+                    {"tool": "launch_application", "args": {"app_name": app_target}, "result": step1},
+                    {"tool": "type_text", "args": {"text": text_to_type, "press_enter": press_enter}, "result": step2}
+                ],
+                "success": True
+            }
+
+        # Compound: "create folder <name> [on <loc>] and open it"
+        create_and_open = re.match(r"^create\s+(?:a\s+)?(?:new\s+)?folder\s+([^\s]+)(?:\s+(?:on|in)\s+([^\s]+))?\s+and\s+open\s+it$", p_clean)
+        if create_and_open:
+            f_name = create_and_open.group(1).strip()
+            f_loc = create_and_open.group(2).strip() if create_and_open.group(2) else "desktop"
+            step1 = self.execute_tool("create_file_or_folder", {"item_type": "folder", "name": f_name, "location": f_loc})
+            real_dir = tools.os_tools.get_real_folder(f_loc) / f_name
+            step2 = self.execute_tool("open_folder", {"folder_path": str(real_dir)})
+            return {
+                "response": f"Created folder '{f_name}' on {f_loc} and opened it.",
+                "steps": [
+                    {"tool": "create_file_or_folder", "args": {"item_type": "folder", "name": f_name, "location": f_loc}, "result": step1},
+                    {"tool": "open_folder", "args": {"folder_path": str(real_dir)}, "result": step2}
+                ],
+                "success": True
+            }
+
+        # Multi-command chaining with 'and then' or 'then'
+        chain_parts = [part.strip() for part in re.split(r"\s+(?:and\s+then|then|and\s+also)\s+", p_clean) if part.strip()]
+        if len(chain_parts) > 1:
+            all_steps = []
+            responses = []
+            all_success = True
+            for part in chain_parts:
+                sub_res = self._autonomous_local_execute(part)
+                if sub_res:
+                    all_steps.extend(sub_res.get("steps", []))
+                    responses.append(sub_res.get("response", ""))
+                    time.sleep(0.3)
+                else:
+                    all_success = False
+            if all_steps:
+                return {
+                    "response": " ".join(responses) if responses else "Chained sequence completed.",
+                    "steps": all_steps,
+                    "success": all_success
+                }
 
         # 1. Presence, Identity & Small Talk (<1ms response)
         if re.search(r"\bwhere\s+are\s+you\b|\bwhere\s+do\s+you\s+live\b|\bwhere\s+are\s+you\s+located\b", p_clean):
@@ -336,7 +404,7 @@ class TARSAgent:
             res = self.execute_tool("press_keys", {"keys": ["backspace"]})
             return {"response": "Deleted character.", "steps": [{"tool": "press_keys", "args": {"keys": ["backspace"]}, "result": res}], "success": True}
 
-        if re.search(r"\b(press|hit)?\s*(delete)\s*(key)?\b", p_clean):
+        if re.search(r"\b(press|hit)\s+(delete|del)\s*(key)?\b|^(?:delete|del)\s*(?:key)?$", p_clean):
             res = self.execute_tool("press_keys", {"keys": ["delete"]})
             return {"response": "Pressed delete.", "steps": [{"tool": "press_keys", "args": {"keys": ["delete"]}, "result": res}], "success": True}
 
@@ -407,7 +475,7 @@ class TARSAgent:
             res = self.execute_tool("maximize_active_window", {})
             return {"response": "Window maximized.", "steps": [{"tool": "maximize_active_window", "args": {}, "result": res}], "success": True}
 
-        if re.search(r"\b(minimize|min)\b.*?\b(all|desktop|everything)\b|\bshow\s+desktop\b|\bdesktop\b", p_clean):
+        if re.search(r"\b(minimize|min)\s+(all|desktop|everything)\b|\bshow\s+desktop\b|\bgo\s+to\s+desktop\b|\bclear\s+screen\b|^desktop$", p_clean):
             res = self.execute_tool("minimize_all_windows", {})
             return {"response": "Desktop cleared. All windows minimized.", "steps": [{"tool": "minimize_all_windows", "args": {}, "result": res}], "success": True}
 
@@ -503,22 +571,27 @@ class TARSAgent:
             return {"response": "Restarted track.", "steps": [{"tool": "media_control", "args": {"action": "prev"}, "result": res}], "success": True}
 
         # 14. Direct Terminal / PowerShell Execution
-        term_match = re.match(r"^(?:run|execute|exec|powershell|cmd|terminal)\s+(.+)", p_clean)
+        term_match = re.match(r"^(?:run|execute|exec|powershell|cmd|terminal)\s+(?:command\s+)?(.+)", p_clean)
         if term_match:
             cmd_to_run = term_match.group(1).strip()
             res = self.execute_tool("run_powershell", {"command": cmd_to_run})
             stdout = res.get("stdout", "").strip()
-            summary = stdout[:120] if stdout else "Command completed."
+            summary = stdout[:160] if stdout else "Command completed."
             return {
                 "response": f"Executed: {summary}",
                 "steps": [{"tool": "run_powershell", "args": {"command": cmd_to_run}, "result": res}],
                 "success": res.get("success", True)
             }
 
-        if p_clean in ["ipconfig", "dir", "ls", "systeminfo", "hostname", "whoami"] or p_clean.startswith("git ") or p_clean.startswith("ping "):
+        common_shell_cmds = [
+            "ipconfig", "dir", "ls", "systeminfo", "hostname", "whoami", "pwd",
+            "netstat", "tasklist", "taskkill", "winget", "cls", "clear", "curl", "netsh"
+        ]
+        cmd_head = p_clean.split()[0] if p_clean.split() else ""
+        if p_clean in common_shell_cmds or cmd_head in common_shell_cmds or cmd_head in ["git", "python", "py", "pip", "node", "npm", "npx", "docker"]:
             res = self.execute_tool("run_powershell", {"command": p_clean})
             stdout = res.get("stdout", "").strip()
-            summary = stdout[:120] if stdout else "Command completed."
+            summary = stdout[:160] if stdout else "Command completed."
             return {
                 "response": f"Output: {summary}",
                 "steps": [{"tool": "run_powershell", "args": {"command": p_clean}, "result": res}],
@@ -552,7 +625,98 @@ class TARSAgent:
                 "success": True
             }
 
-        # 18. Application, Folder, and Website Navigation (Zero-Latency Local Launch)
+        # 18. Windows System Keys & Desktop Features
+        if re.search(r"\b(start\s+menu|windows\s+key|press\s+windows|press\s+win|press\s+start)\b", p_clean) or p_clean in ["start", "win", "windows"]:
+            res = self.execute_tool("press_keys", {"keys": ["win"]})
+            return {"response": "Opened Start menu.", "steps": [{"tool": "press_keys", "args": {"keys": ["win"]}, "result": res}], "success": True}
+
+        if re.search(r"\btask\s*mgr\b|\btask\s*manager\b", p_clean):
+            res = self.execute_tool("press_keys", {"keys": ["ctrl", "shift", "escape"]})
+            return {"response": "Opened Task Manager.", "steps": [{"tool": "press_keys", "args": {"keys": ["ctrl", "shift", "escape"]}, "result": res}], "success": True}
+
+        if re.search(r"\b(file\s+explorer|my\s+computer|this\s+pc|open\s+explorer)\b", p_clean):
+            res = self.execute_tool("press_keys", {"keys": ["win", "e"]})
+            return {"response": "Opened File Explorer.", "steps": [{"tool": "press_keys", "args": {"keys": ["win", "e"]}, "result": res}], "success": True}
+
+        if re.search(r"\brun\s+dialog\b|\bopen\s+run\b", p_clean):
+            res = self.execute_tool("press_keys", {"keys": ["win", "r"]})
+            return {"response": "Opened Run dialog.", "steps": [{"tool": "press_keys", "args": {"keys": ["win", "r"]}, "result": res}], "success": True}
+
+        if re.search(r"\b(action\s+center|notification\s+center|notifications|show\s+notifications)\b", p_clean):
+            res = self.execute_tool("press_keys", {"keys": ["win", "a"]})
+            return {"response": "Opened Action Center.", "steps": [{"tool": "press_keys", "args": {"keys": ["win", "a"]}, "result": res}], "success": True}
+
+        if re.search(r"\bclipboard\s+history\b", p_clean):
+            res = self.execute_tool("press_keys", {"keys": ["win", "v"]})
+            return {"response": "Opened Clipboard History.", "steps": [{"tool": "press_keys", "args": {"keys": ["win", "v"]}, "result": res}], "success": True}
+
+        # 19. File & Folder Operations
+        if re.search(r"\b(empty|clean|clear)\b.*?\b(recycle\s+bin|trash|bin)\b", p_clean):
+            res = self.execute_tool("empty_recycle_bin", {})
+            return {"response": "Recycle Bin emptied.", "steps": [{"tool": "empty_recycle_bin", "args": {}, "result": res}], "success": True}
+
+        cf_match = re.search(r"\bcreate\s+(?:a\s+)?(?:new\s+)?(?:folder|directory|dir)\s+(?:named\s+|called\s+)?([^\s]+)(?:\s+(?:on|in)\s+([^\s]+))?", p_clean)
+        if cf_match:
+            f_name = cf_match.group(1).strip()
+            f_loc = cf_match.group(2).strip() if cf_match.group(2) else "desktop"
+            res = self.execute_tool("create_file_or_folder", {"item_type": "folder", "name": f_name, "location": f_loc})
+            return {"response": f"Created folder '{f_name}' on {f_loc}.", "steps": [{"tool": "create_file_or_folder", "args": {"item_type": "folder", "name": f_name, "location": f_loc}, "result": res}], "success": True}
+
+        cfile_match = re.search(r"\bcreate\s+(?:a\s+)?(?:new\s+)?(?:text\s+)?file\s+(?:named\s+|called\s+)?([^\s]+)(?:\s+(?:on|in)\s+([^\s]+))?(?:\s+with\s+(?:content|text)\s+(.+))?", p_clean)
+        if cfile_match:
+            f_name = cfile_match.group(1).strip()
+            f_loc = cfile_match.group(2).strip() if cfile_match.group(2) else "desktop"
+            f_content = cfile_match.group(3).strip() if cfile_match.group(3) else ""
+            res = self.execute_tool("create_file_or_folder", {"item_type": "file", "name": f_name, "location": f_loc, "content": f_content})
+            return {"response": f"Created file '{f_name}' on {f_loc}.", "steps": [{"tool": "create_file_or_folder", "args": {"item_type": "file", "name": f_name, "location": f_loc, "content": f_content}, "result": res}], "success": True}
+
+        del_match = re.search(r"\bdelete\s+(?:the\s+)?(?:file|folder|dir|item)\s+([^\s]+)(?:\s+(?:from|on|in)\s+([^\s]+))?", p_clean)
+        if del_match:
+            t_name = del_match.group(1).strip()
+            t_loc = del_match.group(2).strip() if del_match.group(2) else "desktop"
+            res = self.execute_tool("delete_file_or_folder", {"name": t_name, "location": t_loc})
+            return {"response": res.get("message", f"Deleted '{t_name}'."), "steps": [{"tool": "delete_file_or_folder", "args": {"name": t_name, "location": t_loc}, "result": res}], "success": res.get("success", True)}
+
+        list_match = re.search(r"\b(?:list|show|view|display|what's\s+in)\s+(?:the\s+)?files?(?:\s+(?:in|on)\s+([^\s]+))?", p_clean)
+        if list_match:
+            loc = list_match.group(1).strip() if list_match.group(1) else "desktop"
+            res = self.execute_tool("list_directory", {"location": loc})
+            if res.get("success"):
+                return {"response": f"Files in {loc} ({res.get('count', 0)} items): {res.get('summary', '')}.", "steps": [{"tool": "list_directory", "args": {"location": loc}, "result": res}], "success": True}
+            return {"response": res.get("error", f"Could not list {loc}."), "steps": [{"tool": "list_directory", "args": {"location": loc}, "result": res}], "success": False}
+
+        # 20. Network & Diagnostics
+        if re.search(r"\b(?:my\s+)?ip\s+address\b|\bwhat\s+is\s+my\s+ip\b|\bshow\s+ip\b", p_clean):
+            net = self.execute_tool("get_network_info", {})
+            return {"response": f"Device: {net.get('hostname')}, Local IP: {net.get('local_ip')}.", "steps": [{"tool": "get_network_info", "args": {}, "result": net}], "success": True}
+
+        if re.search(r"\b(storage|disk\s+space|free\s+space|hard\s+drive|drive\s+space)\b", p_clean):
+            telem = self.execute_tool("get_system_telemetry", {})
+            return {"response": f"Primary drive has {telem['disk_free_gb']} GB free out of {telem['disk_total_gb']} GB.", "steps": [{"tool": "get_system_telemetry", "args": {}, "result": telem}], "success": True}
+
+        if re.search(r"\b(?:what\s+(?:is|apps\s+are)\s+running|running\s+(?:apps|windows|tasks)|active\s+windows|show\s+tasks)\b", p_clean):
+            wins = self.execute_tool("get_running_windows", {})
+            summary = ", ".join(wins[:8]) if wins else "No top-level windows detected."
+            return {"response": f"Active windows: {summary}.", "steps": [{"tool": "get_running_windows", "args": {}, "result": {"windows": wins}}], "success": True}
+
+        # 21. System Power Management
+        if re.search(r"\b(restart|reboot)\s+(?:the\s+|my\s+)?(?:pc|computer|system|windows)\b", p_clean):
+            res = self.execute_tool("system_power", {"action": "restart", "delay_sec": 10})
+            return {"response": "System reboot scheduled in 10 seconds. Say 'cancel restart' to abort.", "steps": [{"tool": "system_power", "args": {"action": "restart", "delay_sec": 10}, "result": res}], "success": True}
+
+        if re.search(r"\b(shut\s*down|power\s+off)\s+(?:the\s+|my\s+)?(?:pc|computer|system|windows)\b", p_clean):
+            res = self.execute_tool("system_power", {"action": "shutdown", "delay_sec": 15})
+            return {"response": "System shutdown scheduled in 15 seconds. Say 'cancel shutdown' to abort.", "steps": [{"tool": "system_power", "args": {"action": "shutdown", "delay_sec": 15}, "result": res}], "success": True}
+
+        if re.search(r"\b(sleep|suspend)\s+(?:the\s+|my\s+)?(?:pc|computer|system|windows)\b", p_clean):
+            res = self.execute_tool("system_power", {"action": "sleep"})
+            return {"response": "Entering sleep mode.", "steps": [{"tool": "system_power", "args": {"action": "sleep"}, "result": res}], "success": True}
+
+        if re.search(r"\b(cancel|abort|stop)\s+(?:the\s+)?(?:shutdown|restart|reboot)\b", p_clean):
+            res = self.execute_tool("system_power", {"action": "cancel"})
+            return {"response": "Shutdown aborted.", "steps": [{"tool": "system_power", "args": {"action": "cancel"}, "result": res}], "success": True}
+
+        # 22. Application, Folder, and Website Navigation (Zero-Latency Local Launch)
         nav_match = re.match(r"^(?:go to|navigate to|visit|open up|open|launch|start|take me to|show me|bring up)\s+(?:the\s+)?(?:my\s+)?(.+)", p_clean)
         if nav_match:
             target = nav_match.group(1).strip()
@@ -663,10 +827,13 @@ class TARSAgent:
                     self._cloud_quota_exceeded = True
 
         # 4. Universal Immediate Fallback (<1ms)
-        fallback_reply = "Command executed."
+        fallback_reply = (
+            f"Standing by. I heard '{user_prompt}', but did not detect a recognized system task. "
+            f"You can ask me to open apps, manage windows, create files, control volume, or run PowerShell commands."
+        )
         self.memory.add_message("assistant", fallback_reply, steps_log)
         return {
             "response": fallback_reply,
             "steps": steps_log,
-            "success": True
+            "success": False
         }

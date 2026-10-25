@@ -142,6 +142,37 @@ class TestTARS(unittest.TestCase):
         self.assertTrue(res_max["success"])
         self.assertEqual(res_max["steps"][0]["tool"], "maximize_active_window")
 
+    def test_windows_system_keys(self):
+        res_start = self.agent.run_agent_loop("open start menu")
+        self.assertTrue(res_start["success"])
+        self.assertEqual(res_start["steps"][0]["tool"], "press_keys")
+
+        res_taskmgr = self.agent.run_agent_loop("open task manager")
+        self.assertTrue(res_taskmgr["success"])
+        self.assertEqual(res_taskmgr["steps"][0]["tool"], "press_keys")
+
+    def test_file_system_operations(self):
+        res_create = self.agent.run_agent_loop("create folder test_unit_tars on desktop")
+        self.assertTrue(res_create["success"])
+        self.assertEqual(res_create["steps"][0]["tool"], "create_file_or_folder")
+
+        res_list = self.agent.run_agent_loop("list files in desktop")
+        self.assertTrue(res_list["success"])
+        self.assertEqual(res_list["steps"][0]["tool"], "list_directory")
+
+        res_del = self.agent.run_agent_loop("delete folder test_unit_tars on desktop")
+        self.assertTrue(res_del["success"])
+        self.assertEqual(res_del["steps"][0]["tool"], "delete_file_or_folder")
+
+    def test_network_and_power(self):
+        res_ip = self.agent.run_agent_loop("what is my ip")
+        self.assertTrue(res_ip["success"])
+        self.assertEqual(res_ip["steps"][0]["tool"], "get_network_info")
+
+        res_abort = self.agent.run_agent_loop("cancel shutdown")
+        self.assertTrue(res_abort["success"])
+        self.assertEqual(res_abort["steps"][0]["tool"], "system_power")
+
 
 if __name__ == "__main__":
     unittest.main()
